@@ -9,6 +9,7 @@ import type { RepoSyncer } from './repo-syncer'
 import * as githubClient from './github-client'
 import * as gitlabClient from './gitlab-client'
 import { showNotification } from './notification-manager'
+import { logger } from './logger'
 
 /**
  * Registers all IPC handlers for communication with the renderer.
@@ -21,6 +22,8 @@ export function registerIpcHandlers(
   repoSyncer: RepoSyncer,
   mainWindow: BrowserWindow,
 ): void {
+  let oauthAbort: AbortController | null = null
+
   ipcMain.handle('auth:oauth-availability', () => {
     return {
       github: !!import.meta.env.MAIN_VITE_GITHUB_CLIENT_ID,
@@ -34,6 +37,10 @@ export function registerIpcHandlers(
       throw new Error('MAIN_VITE_GITHUB_CLIENT_ID is not configured')
     }
 
+    oauthAbort?.abort()
+    oauthAbort = new AbortController()
+    const { signal } = oauthAbort
+
     mainWindow.webContents.send('oauth:progress', {
       phase: 'requesting_code',
       userCode: null,
@@ -42,6 +49,7 @@ export function registerIpcHandlers(
     })
 
     try {
+      logger.info('GitHub OAuth: starting device flow')
       const flow = await githubClient.startDeviceFlow(clientId)
 
       mainWindow.webContents.send('oauth:progress', {
@@ -60,7 +68,13 @@ export function registerIpcHandlers(
         error: null,
       })
 
-      const token = await githubClient.pollForToken(clientId, flow.deviceCode, flow.interval)
+      logger.info('GitHub OAuth: polling for token')
+      const token = await githubClient.pollForToken(
+        clientId,
+        flow.deviceCode,
+        flow.interval,
+        signal,
+      )
       const validation = await githubClient.validateToken(token)
 
       if (!validation.valid || !validation.username) {
@@ -70,6 +84,7 @@ export function registerIpcHandlers(
       tokenStore.saveToken('github', token)
       configManager.setGitHubConnection({ provider: 'github', username: validation.username })
       repoSyncer.start()
+      logger.info(`GitHub OAuth: connected as ${validation.username}`)
 
       mainWindow.webContents.send('oauth:progress', {
         phase: 'success',
@@ -78,6 +93,8 @@ export function registerIpcHandlers(
         error: null,
       })
     } catch (err) {
+      if (signal.aborted) return
+      logger.error(`GitHub OAuth: ${String(err)}`)
       mainWindow.webContents.send('oauth:progress', {
         phase: 'error',
         userCode: null,
@@ -93,6 +110,10 @@ export function registerIpcHandlers(
     if (!clientId) {
       throw new Error('MAIN_VITE_GITLAB_CLIENT_ID is not configured')
     }
+
+    oauthAbort?.abort()
+    oauthAbort = new AbortController()
+    const { signal } = oauthAbort
 
     mainWindow.webContents.send('oauth:progress', {
       phase: 'requesting_code',
@@ -120,7 +141,12 @@ export function registerIpcHandlers(
         error: null,
       })
 
-      const token = await gitlabClient.pollForToken(clientId, flow.deviceCode, flow.interval)
+      const token = await gitlabClient.pollForToken(
+        clientId,
+        flow.deviceCode,
+        flow.interval,
+        signal,
+      )
       const validation = await gitlabClient.validateOAuthToken(token, 'https://gitlab.com')
 
       if (!validation.valid || !validation.username) {
@@ -143,6 +169,7 @@ export function registerIpcHandlers(
         error: null,
       })
     } catch (err) {
+      if (signal.aborted) return
       mainWindow.webContents.send('oauth:progress', {
         phase: 'error',
         userCode: null,
@@ -151,6 +178,11 @@ export function registerIpcHandlers(
       })
       throw err
     }
+  })
+
+  ipcMain.handle('auth:cancel-oauth', () => {
+    oauthAbort?.abort()
+    oauthAbort = null
   })
 
   ipcMain.handle('auth:save-github-pat', async (_event, token: string) => {
@@ -305,5 +337,29 @@ export function registerIpcHandlers(
           ? 'If nothing appeared, enable notifications for "Electron" in System Settings > Notifications'
           : null,
     }
+  })
+
+  ipcMain.handle('window:minimize', () => {
+    mainWindow.minimize()
+  })
+
+  ipcMain.handle('window:maximize', () => {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize()
+    } else {
+      mainWindow.maximize()
+    }
+  })
+
+  ipcMain.handle('window:close', () => {
+    mainWindow.close()
+  })
+
+  ipcMain.handle('logs:get', () => {
+    return logger.getEntries()
+  })
+
+  ipcMain.handle('logs:clear', () => {
+    logger.clear()
   })
 }

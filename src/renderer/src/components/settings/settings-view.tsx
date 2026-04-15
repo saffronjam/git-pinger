@@ -1,5 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { ArrowLeft, Bell, Check } from 'lucide-react'
+import { GitPingerLogo } from '@/components/icons/gitpinger-logo'
 import { AppShell } from '@/components/layout/app-shell'
 import { AppHeader } from '@/components/layout/app-header'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,7 @@ import { PollIntervalSetting } from './poll-interval-setting'
 import { LookbackSetting } from './lookback-setting'
 import { ThemeSetting } from './theme-setting'
 import { NotificationTemplateSetting } from './notification-template-setting'
+import { LogViewer } from './log-viewer'
 import { DEFAULT_TEMPLATES } from '../../../../shared/config'
 
 interface SettingsViewProps {
@@ -44,15 +46,22 @@ export function SettingsView({ onBack }: SettingsViewProps): ReactNode {
 
   return (
     <AppShell>
-      <AppHeader>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="size-4" />
-          </Button>
-          <span className="text-lg font-semibold">Settings</span>
-        </div>
-        <div />
-      </AppHeader>
+      <AppHeader
+        left={
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="size-4" />
+            </Button>
+            <span className="text-lg font-semibold">Settings</span>
+          </div>
+        }
+        center={
+          <div className="flex items-center gap-2">
+            <GitPingerLogo className="size-5 text-violet-500" />
+            <span className="text-lg font-semibold">GitPinger</span>
+          </div>
+        }
+      />
 
       <div className="space-y-6 overflow-auto p-4">
         <section>
@@ -131,13 +140,28 @@ export function SettingsView({ onBack }: SettingsViewProps): ReactNode {
 
         <Separator />
 
+        <section className="space-y-4">
+          <h3 className="text-sm font-medium text-muted-foreground">Diagnostics</h3>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm">Application logs</p>
+              <p className="text-xs text-muted-foreground">
+                View internal logs for troubleshooting
+              </p>
+            </div>
+            <LogViewer />
+          </div>
+        </section>
+
+        <Separator />
+
         <section>
-          <div className="rounded-lg border border-red-500/50 bg-black p-4">
+          <div className="rounded-lg border border-red-500/50 bg-red-500/5 p-4">
             <h3 className="mb-3 text-sm font-medium text-red-500">Danger Zone</h3>
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-neutral-200">Reset settings</p>
-                <p className="text-xs text-neutral-400">
+                <p className="text-sm">Reset settings</p>
+                <p className="text-xs text-muted-foreground">
                   Restore all settings to factory defaults and remove all connections
                 </p>
               </div>
@@ -169,6 +193,8 @@ export function SettingsView({ onBack }: SettingsViewProps): ReactNode {
             </div>
           </div>
         </section>
+
+        <p className="text-center text-xs text-muted-foreground">{__APP_VERSION__}</p>
       </div>
     </AppShell>
   )

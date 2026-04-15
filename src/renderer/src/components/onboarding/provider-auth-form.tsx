@@ -150,6 +150,18 @@ export function ProviderAuthForm({
               <Loader2 className="size-4 animate-spin" />
               Waiting for authorization...
             </div>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                window.api.auth.cancelOAuth()
+                setOauthStatus(null)
+                setConnecting(false)
+                setError(null)
+              }}
+            >
+              Cancel
+            </Button>
           </>
         )}
 

@@ -3,6 +3,7 @@ import type { DetectedEvent } from '../shared/notification'
 import type { AvailableProject, MonitoredProject, NotificationEventFlags } from '../shared/project'
 import type { Provider } from '../shared/provider'
 import type {
+  LogEntry,
   OAuthAvailability,
   OAuthDeviceFlowStatus,
   PollerStatus,
@@ -17,6 +18,7 @@ interface GitPingerAPI {
     startGitLabOAuth(): Promise<void>
     saveGitHubPat(token: string): Promise<ValidateTokenResult>
     saveGitLabPat(token: string, instanceUrl: string): Promise<ValidateTokenResult>
+    cancelOAuth(): Promise<void>
     removeProvider(provider: Provider): Promise<void>
     getConnections(): Promise<AppConfig['connections']>
   }
@@ -46,6 +48,16 @@ interface GitPingerAPI {
     start(): Promise<void>
     stop(): Promise<void>
     getStatus(): Promise<PollerStatus>
+  }
+  logs: {
+    get(): Promise<LogEntry[]>
+    clear(): Promise<void>
+  }
+  window: {
+    minimize(): Promise<void>
+    maximize(): Promise<void>
+    close(): Promise<void>
+    platform: string
   }
   on: {
     pollerStatusChanged(callback: (status: PollerStatus) => void): () => void

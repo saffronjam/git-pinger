@@ -4,6 +4,7 @@ import type { DetectedEvent } from '../shared/notification'
 import type { AvailableProject, MonitoredProject, NotificationEventFlags } from '../shared/project'
 import type { Provider } from '../shared/provider'
 import type {
+  LogEntry,
   OAuthAvailability,
   OAuthDeviceFlowStatus,
   PollerStatus,
@@ -21,6 +22,7 @@ const api = {
       ipcRenderer.invoke('auth:save-github-pat', token),
     saveGitLabPat: (token: string, instanceUrl: string): Promise<ValidateTokenResult> =>
       ipcRenderer.invoke('auth:save-gitlab-pat', token, instanceUrl),
+    cancelOAuth: (): Promise<void> => ipcRenderer.invoke('auth:cancel-oauth'),
     removeProvider: (provider: Provider): Promise<void> =>
       ipcRenderer.invoke('auth:remove-provider', provider),
     getConnections: (): Promise<AppConfig['connections']> =>
@@ -97,6 +99,17 @@ const api = {
       ipcRenderer.on('oauth:progress', listener)
       return () => ipcRenderer.removeListener('oauth:progress', listener)
     },
+  },
+  logs: {
+    get: (): Promise<LogEntry[]> => ipcRenderer.invoke('logs:get'),
+    clear: (): Promise<void> => ipcRenderer.invoke('logs:clear'),
+  },
+
+  window: {
+    minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
+    maximize: (): Promise<void> => ipcRenderer.invoke('window:maximize'),
+    close: (): Promise<void> => ipcRenderer.invoke('window:close'),
+    platform: process.platform,
   },
 } as const
 

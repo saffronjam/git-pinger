@@ -3,6 +3,12 @@ import type { DetectedEvent } from './notification'
 import type { AvailableProject, MonitoredProject, NotificationEventFlags } from './project'
 import type { Provider } from './provider'
 
+export interface LogEntry {
+  timestamp: string
+  level: 'info' | 'warn' | 'error'
+  message: string
+}
+
 export interface ValidateTokenResult {
   valid: boolean
   username: string | null
@@ -66,6 +72,7 @@ export interface IpcInvokeChannels {
   'auth:start-gitlab-oauth': [args: [], result: void]
   'auth:save-github-pat': [args: [token: string], result: ValidateTokenResult]
   'auth:save-gitlab-pat': [args: [token: string, instanceUrl: string], result: ValidateTokenResult]
+  'auth:cancel-oauth': [args: [], result: void]
   'auth:remove-provider': [args: [provider: Provider], result: void]
   'auth:get-connections': [args: [], result: AppConfig['connections']]
   'config:get': [args: [], result: AppConfig]
@@ -86,6 +93,11 @@ export interface IpcInvokeChannels {
   'poller:stop': [args: [], result: void]
   'poller:get-status': [args: [], result: PollerStatus]
   'notifications:test': [args: [], result: { sent: boolean; error: string | null }]
+  'logs:get': [args: [], result: LogEntry[]]
+  'logs:clear': [args: [], result: void]
+  'window:minimize': [args: [], result: void]
+  'window:maximize': [args: [], result: void]
+  'window:close': [args: [], result: void]
 }
 
 /**
