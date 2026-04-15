@@ -73,9 +73,27 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.drag-region button,
+.drag-region input,
+.drag-region a {
+  -webkit-app-region: no-drag;
+}
+
 @layer base {
   * {
     @apply border-border;
+  }
+
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
   }
 
   body {

@@ -1,5 +1,5 @@
 appId: com.saffronjam.git-pinger
-productName: git-pinger
+productName: GitPinger
 directories:
   buildResources: build
 files:
