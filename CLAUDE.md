@@ -44,26 +44,44 @@ bun run build:linux      # Build for Linux
 
 ## Architecture
 
-### Process Model (Electron three-process split)
+### Process Model
 
 ```
 src/
-├── main/          # Main process (Node.js) — app lifecycle, tray, notifications, API polling
-│   └── index.ts
-├── preload/       # Preload scripts — IPC bridge between main and renderer
-│   ├── index.ts
-│   └── index.d.ts
-└── renderer/      # Renderer process (React app in Chromium)
+├── shared/            # Type-only definitions shared by main + renderer (no runtime code)
+│   ├── config.ts      # AppConfig schema + defaults
+│   ├── ipc.ts         # Typed IPC channel map (invoke + push channels)
+│   ├── notification.ts
+│   ├── project.ts
+│   └── provider.ts
+├── main/              # Main process (Node.js)
+│   ├── index.ts       # Entry: wires up modules, creates window
+│   ├── config-manager.ts   # electron-conf wrapper
+│   ├── token-store.ts      # safeStorage encrypted token persistence
+│   ├── github-client.ts    # GitHub API + OAuth Device Flow
+│   ├── gitlab-client.ts    # GitLab API + OAuth Device Flow + PAT
+│   ├── poller.ts           # Timer-based API polling
+│   ├── notification-manager.ts  # Native OS notifications (with GC reference holding)
+│   └── ipc-handlers.ts    # All ipcMain.handle registrations
+├── preload/           # IPC bridge — typed window.api
+│   ├── index.ts       # contextBridge.exposeInMainWorld('api', ...)
+│   └── index.d.ts     # GitPingerAPI type for renderer
+└── renderer/          # React UI
     ├── src/
-    │   ├── app.tsx
-    │   ├── main.tsx
-    │   ├── assets/main.css   # Tailwind + theme CSS variables
+    │   ├── app.tsx           # View switcher (onboarding/main/settings)
+    │   ├── main.tsx          # Entry: providers + Toaster
+    │   ├── assets/main.css   # Tailwind v4 + theme CSS + drag-region
     │   ├── components/
-    │   │   └── ui/           # shadcn components (via `bunx shadcn@latest add`)
+    │   │   ├── ui/           # shadcn primitives
+    │   │   ├── layout/       # AppShell, AppHeader
+    │   │   ├── onboarding/   # OnboardingView, GitHubOAuthForm, GitLabAuthForm
+    │   │   ├── main/         # MainView, ProjectRow, ProviderSection, EventConfig
+    │   │   └── settings/     # SettingsView, ConnectionCard, poll/lookback/theme
     │   ├── hooks/
-    │   │   └── use-theme.tsx # Dark/light/system theme provider
-    │   └── lib/
-    │       └── utils.ts      # cn() utility for Tailwind class merging
+    │   │   ├── use-theme.tsx
+    │   │   ├── use-config.tsx       # AppConfigProvider (synced via IPC push)
+    │   │   └── use-poller-status.tsx
+    │   └── lib/utils.ts
     └── index.html
 ```
 
@@ -95,21 +113,18 @@ Theme is managed by `ThemeProvider` in `hooks/use-theme.tsx`. It applies a `.dar
 
 ### API Integration
 
-**GitHub** — Fine-grained PAT with `pull_requests: read` permission:
+**GitHub** — OAuth Device Flow (scopes: `repo`, `notifications`, `read:user`). Requires `MAIN_VITE_GITHUB_CLIENT_ID` env var:
 
+- `GET /user` — validate token
 - `GET /user/repos` — list accessible repos
-- `GET /repos/{owner}/{repo}/pulls` — list PRs
-- `GET /repos/{owner}/{repo}/pulls/{n}/requested_reviewers` — review requests
-- `GET /repos/{owner}/{repo}/pulls/{n}/reviews` — reviews
-- `GET /notifications` — notification threads (filter by `reason`: `review_requested`, `assign`, `state_change`)
+- `GET /notifications?since=&participating=true` — PR notifications (filtered by reason)
 
-**GitLab** — PAT or OAuth with `read_api` scope:
+**GitLab** — OAuth Device Flow for gitlab.com (`MAIN_VITE_GITLAB_CLIENT_ID`), PAT for self-hosted (`read_api` scope):
 
-- `GET /projects?membership=true` — list projects
-- `GET /merge_requests?scope=assigned_to_me` — MRs assigned to user
-- `GET /merge_requests?scope=reviews_for_me` — MRs awaiting user's review
-- `GET /projects/:id/merge_requests` — project MRs
-- `GET /projects/:id/merge_requests/:iid/reviewers` — MR reviewers
+- `GET /api/v4/user` — validate token
+- `GET /api/v4/projects?membership=true` — list projects
+- `GET /api/v4/merge_requests?scope=assigned_to_me` — assigned MRs
+- `GET /api/v4/merge_requests?scope=reviews_for_me` — review-requested MRs
 
 ### MVP Notification Events (per-project toggle)
 
@@ -121,8 +136,9 @@ Theme is managed by `ThemeProvider` in `hooks/use-theme.tsx`. It applies a `.dar
 
 - **Notification GC bug (macOS)**: Always hold a reference to `Notification` objects until click/close fires, or event handlers get garbage-collected after ~1-2 minutes
 - **Adding shadcn components**: `bunx shadcn@latest add <component>` — components land in `src/renderer/src/components/ui/`
-- **IPC typing**: Define channel names and payloads as shared types used by both preload and renderer to keep IPC fully typed
-- **Environment variables**: Use `MAIN_VITE_` prefix for main process, `RENDERER_VITE_` for renderer
+- **IPC typing**: All channels defined in `src/shared/ipc.ts`. Preload exposes `window.api` with typed methods. Types declared in `src/preload/index.d.ts`.
+- **Environment variables**: `MAIN_VITE_GITHUB_CLIENT_ID` and `MAIN_VITE_GITLAB_CLIENT_ID` for OAuth. Use `MAIN_VITE_` prefix for main process, `RENDERER_VITE_` for renderer.
+- **Shared types**: `src/shared/` contains type-only files importable by both tsconfigs. No runtime code — only types, interfaces, and const values.
 
 ### UX Flow
 
