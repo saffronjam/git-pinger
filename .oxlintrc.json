@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "react-hooks"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "sort-imports": "off",
+    "sort-keys": "off",
+    "curly": "off",
+    "func-style": "off",
+    "react/react-in-jsx-scope": "off",
+    "react/jsx-props-no-spreading": "off",
+    "unicorn/filename-case": ["warn", { "cases": { "kebabCase": true } }],
+    "unicorn/prefer-global-this": "off"
+  },
+  "ignorePatterns": ["out/", "dist/", "node_modules/"],
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "node": true
+  }
+}
