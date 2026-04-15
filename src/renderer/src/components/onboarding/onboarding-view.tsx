@@ -1,19 +1,24 @@
 import { useState, type ReactNode } from 'react'
 import { AppShell } from '@/components/layout/app-shell'
+import { WindowControls } from '@/components/layout/window-controls'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { GitHubIcon } from '@/components/icons/github-icon'
 import { GitLabIcon } from '@/components/icons/gitlab-icon'
 import { GitPingerLogo } from '@/components/icons/gitpinger-logo'
+import { usePlatform } from '@/hooks/use-platform'
 import { ProviderAuthForm } from './provider-auth-form'
 
 /** Onboarding screen shown when no providers are connected. */
 export function OnboardingView(): ReactNode {
   const [gitlabUrl, setGitlabUrl] = useState('')
+  const platform = usePlatform()
 
   return (
     <AppShell>
-      <div className="drag-region h-12 shrink-0" />
+      <div className="drag-region flex h-12 shrink-0 items-center justify-end">
+        {platform === 'linux' && <WindowControls />}
+      </div>
       <div className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
         <div className="flex items-center gap-3">
           <GitPingerLogo className="size-10 text-violet-500" />

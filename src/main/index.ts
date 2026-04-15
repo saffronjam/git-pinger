@@ -13,17 +13,18 @@ function createWindow(): BrowserWindow {
   const isDark = nativeTheme.shouldUseDarkColors
   const bg = isDark ? '#0a0a0a' : '#ffffff'
   const mainWindow = new BrowserWindow({
-    width: 860,
+    width: 760,
     height: 580,
-    minWidth: 860,
+    minWidth: 760,
     minHeight: 580,
     show: false,
     autoHideMenuBar: true,
     title: '',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 12, y: 12 },
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } }
+      : {}),
+    ...(process.platform === 'linux' ? { frame: false, icon } : {}),
     backgroundColor: bg,
-    ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
