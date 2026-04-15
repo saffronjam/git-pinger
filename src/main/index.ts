@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, nativeTheme, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -10,6 +10,8 @@ import { registerIpcHandlers } from './ipc-handlers'
 
 /** Creates the main application window sized to 80% of the primary display. */
 function createWindow(): BrowserWindow {
+  const isDark = nativeTheme.shouldUseDarkColors
+  const bg = isDark ? '#0a0a0a' : '#ffffff'
   const mainWindow = new BrowserWindow({
     width: 860,
     height: 580,
@@ -20,7 +22,7 @@ function createWindow(): BrowserWindow {
     title: '',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 12, y: 12 },
-    backgroundColor: '#1b1b1f',
+    backgroundColor: bg,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -28,7 +30,7 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  mainWindow.on('ready-to-show', () => {
+  mainWindow.webContents.on('did-finish-load', () => {
     mainWindow.show()
   })
 
@@ -50,10 +52,6 @@ app.setName('GitPinger')
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.saffronjam.git-pinger')
-
-  if (process.platform === 'darwin' && app.dock) {
-    app.dock.setIcon(icon)
-  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
