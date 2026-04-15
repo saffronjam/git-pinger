@@ -211,29 +211,19 @@ export function ProjectRow({ project, onUpdateEvents, onRemove }: ProjectRowProp
             </TooltipTrigger>
             <TooltipContent>Open project in browser</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center">
-                <Switch checked={isEnabled} onCheckedChange={handleMainToggle} />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>{isEnabled ? 'Disable' : 'Enable'}</TooltipContent>
-          </Tooltip>
+          <div className="flex items-center">
+            <Switch checked={isEnabled} onCheckedChange={handleMainToggle} />
+          </div>
           <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-destructive/40 text-destructive hover:border-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </DialogTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Remove</TooltipContent>
-            </Tooltip>
+            <DialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-destructive/40 text-destructive hover:border-destructive hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Remove {project.fullName}?</DialogTitle>
