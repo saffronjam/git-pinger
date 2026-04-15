@@ -1,0 +1,65 @@
+import { Notification, shell } from 'electron'
+import type { AppConfig } from '../shared/config'
+import type { DetectedEvent } from '../shared/notification'
+
+const activeNotifications = new Set<Notification>()
+
+const EVENT_LABELS: Record<string, string> = {
+  pr_created: 'New PR',
+  pr_assigned: 'PR Assigned',
+  pr_review_requested: 'Review Requested',
+}
+
+/** Replaces {{key}} placeholders in a template string with values. */
+function renderTemplate(template: string, variables: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => variables[key] ?? `{{${key}}}`)
+}
+
+/** Builds the template variable map from a detected event. */
+function buildVariables(event: DetectedEvent): Record<string, string> {
+  return {
+    provider: event.provider === 'github' ? 'GitHub' : 'GitLab',
+    project: event.projectFullName,
+    title: event.title,
+    author: event.author,
+    event: EVENT_LABELS[event.type] ?? event.type,
+    url: event.url,
+    type: event.type,
+  }
+}
+
+/**
+ * Shows a native OS notification for a detected event using config templates.
+ * Holds a reference to prevent macOS GC from collecting the handler.
+ */
+export function showNotification(event: DetectedEvent, config: AppConfig): void {
+  if (!Notification.isSupported()) {
+    console.warn('Notifications are not supported on this system')
+    return
+  }
+
+  const variables = buildVariables(event)
+  const template = config.notifications[event.type]
+  const title = renderTemplate(template.titleTemplate, variables)
+  const body = renderTemplate(template.bodyTemplate, variables)
+
+  const notification = new Notification({ title, body })
+
+  activeNotifications.add(notification)
+
+  notification.on('click', () => {
+    shell.openExternal(event.url)
+    activeNotifications.delete(notification)
+  })
+
+  notification.on('close', () => {
+    activeNotifications.delete(notification)
+  })
+
+  notification.on('failed', (_, error) => {
+    console.error('Notification failed:', error)
+    activeNotifications.delete(notification)
+  })
+
+  notification.show()
+}
