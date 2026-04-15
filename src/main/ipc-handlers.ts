@@ -123,6 +123,7 @@ export function registerIpcHandlers(
     })
 
     try {
+      logger.info('GitLab OAuth: starting device flow')
       const flow = await gitlabClient.startDeviceFlow(clientId)
 
       mainWindow.webContents.send('oauth:progress', {
@@ -141,6 +142,7 @@ export function registerIpcHandlers(
         error: null,
       })
 
+      logger.info('GitLab OAuth: polling for token')
       const token = await gitlabClient.pollForToken(
         clientId,
         flow.deviceCode,
@@ -161,6 +163,7 @@ export function registerIpcHandlers(
         authMethod: 'oauth',
       })
       repoSyncer.start()
+      logger.info(`GitLab OAuth: connected as ${validation.username}`)
 
       mainWindow.webContents.send('oauth:progress', {
         phase: 'success',
@@ -170,6 +173,7 @@ export function registerIpcHandlers(
       })
     } catch (err) {
       if (signal.aborted) return
+      logger.error(`GitLab OAuth: ${String(err)}`)
       mainWindow.webContents.send('oauth:progress', {
         phase: 'error',
         userCode: null,
@@ -181,26 +185,32 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('auth:cancel-oauth', () => {
+    logger.info('OAuth flow cancelled by user')
     oauthAbort?.abort()
     oauthAbort = null
   })
 
   ipcMain.handle('auth:save-github-pat', async (_event, token: string) => {
+    logger.info('GitHub PAT: validating token')
     const validation = await githubClient.validateToken(token)
     if (!validation.valid || !validation.username) {
+      logger.warn(`GitHub PAT: validation failed — ${validation.error}`)
       return validation
     }
 
     tokenStore.saveToken('github', token)
     configManager.setGitHubConnection({ provider: 'github', username: validation.username })
     repoSyncer.start()
+    logger.info(`GitHub PAT: connected as ${validation.username}`)
 
     return validation
   })
 
   ipcMain.handle('auth:save-gitlab-pat', async (_event, token: string, instanceUrl: string) => {
+    logger.info(`GitLab PAT: validating token for ${instanceUrl}`)
     const validation = await gitlabClient.validatePat(token, instanceUrl)
     if (!validation.valid || !validation.username) {
+      logger.warn(`GitLab PAT: validation failed — ${validation.error}`)
       return validation
     }
 
@@ -212,11 +222,13 @@ export function registerIpcHandlers(
       authMethod: 'pat',
     })
     repoSyncer.start()
+    logger.info(`GitLab PAT: connected as ${validation.username}`)
 
     return validation
   })
 
   ipcMain.handle('auth:remove-provider', (_event, provider: Provider) => {
+    logger.info(`Removing provider: ${provider}`)
     tokenStore.deleteToken(provider)
     configManager.removeConnection(provider)
 
@@ -241,26 +253,31 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('config:set-polling-interval', (_event, seconds: number) => {
+    logger.info(`Config: polling interval changed to ${seconds}s`)
     configManager.setPollingInterval(seconds)
     poller.restart()
   })
 
   ipcMain.handle('config:set-lookback-minutes', (_event, minutes: number) => {
+    logger.info(`Config: lookback changed to ${minutes}m`)
     configManager.setLookbackMinutes(minutes)
   })
 
   ipcMain.handle('config:set-theme', (_event, theme: AppConfig['theme']) => {
+    logger.info(`Config: theme changed to ${theme}`)
     configManager.setTheme(theme)
   })
 
   ipcMain.handle(
     'config:set-notification-templates',
     (_event, templates: NotificationTemplates) => {
+      logger.info('Config: notification templates updated')
       configManager.setNotificationTemplates(templates)
     },
   )
 
   ipcMain.handle('config:reset', () => {
+    logger.warn('Factory reset initiated')
     poller.stop()
     repoSyncer.stop()
     tokenStore.deleteToken('github')
@@ -281,6 +298,7 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('projects:set-monitored', (_event, projects: MonitoredProject[]) => {
+    logger.info(`Monitored projects updated: ${projects.length} projects`)
     configManager.setMonitoredProjects(projects)
 
     const config = configManager.get()

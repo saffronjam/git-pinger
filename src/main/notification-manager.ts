@@ -1,6 +1,7 @@
 import { Notification, shell } from 'electron'
 import type { AppConfig } from '../shared/config'
 import type { DetectedEvent } from '../shared/notification'
+import { logger } from './logger'
 
 const activeNotifications = new Set<Notification>()
 
@@ -34,7 +35,7 @@ function buildVariables(event: DetectedEvent): Record<string, string> {
  */
 export function showNotification(event: DetectedEvent, config: AppConfig): void {
   if (!Notification.isSupported()) {
-    console.warn('Notifications are not supported on this system')
+    logger.warn('Notifications are not supported on this system')
     return
   }
 
@@ -48,6 +49,7 @@ export function showNotification(event: DetectedEvent, config: AppConfig): void 
   activeNotifications.add(notification)
 
   notification.on('click', () => {
+    logger.info(`Notification clicked: ${event.projectFullName} — ${event.type}`)
     activeNotifications.delete(notification)
     setImmediate(() => {
       shell.openExternal(event.url).catch(() => {})
@@ -59,9 +61,10 @@ export function showNotification(event: DetectedEvent, config: AppConfig): void 
   })
 
   notification.on('failed', (_, error) => {
-    console.error('Notification failed:', error)
+    logger.error(`Notification failed: ${String(error)}`)
     activeNotifications.delete(notification)
   })
 
+  logger.info(`Notification shown: ${event.type} — ${event.projectFullName} — ${event.title}`)
   notification.show()
 }

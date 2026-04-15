@@ -1,3 +1,4 @@
+import log from 'electron-log/main'
 import type { LogEntry } from '../shared/ipc'
 
 type LogLevel = 'info' | 'warn' | 'error'
@@ -5,7 +6,10 @@ type LogLevel = 'info' | 'warn' | 'error'
 const MAX_ENTRIES = 500
 const entries: LogEntry[] = []
 
-/** Appends a log entry and keeps the buffer capped. */
+log.transports.file.level = 'info'
+log.transports.console.level = 'info'
+
+/** Appends a log entry to the in-memory buffer for the UI viewer. */
 function push(level: LogLevel, message: string): void {
   entries.push({ timestamp: new Date().toISOString(), level, message })
   if (entries.length > MAX_ENTRIES) {
@@ -15,22 +19,22 @@ function push(level: LogLevel, message: string): void {
 
 export const logger = {
   info(message: string): void {
-    console.log(`[info] ${message}`)
+    log.info(message)
     push('info', message)
   },
   warn(message: string): void {
-    console.warn(`[warn] ${message}`)
+    log.warn(message)
     push('warn', message)
   },
   error(message: string): void {
-    console.error(`[error] ${message}`)
+    log.error(message)
     push('error', message)
   },
-  /** Returns all log entries. */
+  /** Returns all log entries from the in-memory buffer. */
   getEntries(): LogEntry[] {
     return [...entries]
   },
-  /** Clears all log entries. */
+  /** Clears the in-memory buffer. */
   clear(): void {
     entries.length = 0
   },

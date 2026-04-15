@@ -7,6 +7,7 @@ import type { TokenStore } from './token-store'
 import * as githubClient from './github-client'
 import * as gitlabClient from './gitlab-client'
 import { showNotification } from './notification-manager'
+import { logger } from './logger'
 
 /** Periodically polls GitHub and GitLab APIs for new events. */
 export class Poller {
@@ -34,6 +35,7 @@ export class Poller {
     const config = this.configManager.get()
     const intervalMs = config.polling.intervalSeconds * 1000
 
+    logger.info(`Poller started (interval=${config.polling.intervalSeconds}s)`)
     this.poll()
     this.timer = setInterval(() => this.poll(), intervalMs)
     this.pushStatus()
@@ -44,6 +46,7 @@ export class Poller {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
+      logger.info('Poller stopped')
     }
     this.pushStatus()
   }
@@ -75,6 +78,7 @@ export class Poller {
   /** Restarts the timer with the current config interval. */
   restart(): void {
     if (this.timer) {
+      logger.info('Poller restarting')
       this.stop()
       this.start()
     }
@@ -122,6 +126,8 @@ export class Poller {
       this.seenEvents.set(event.id, event.timestamp)
       showNotification(event, config)
     }
+
+    logger.info(`Poll complete: ${newEvents.length} events found, ${unseenEvents.length} new`)
 
     if (unseenEvents.length > 0) {
       this.pushNewEvents(unseenEvents)
@@ -209,6 +215,7 @@ export class Poller {
 
         this.recordProjectResult(project.id, true)
       } catch (err) {
+        logger.error(`GitHub poll failed for ${project.fullName}: ${String(err)}`)
         this.recordProjectResult(project.id, false, String(err))
         this.errors.push({
           provider: 'github',
@@ -295,6 +302,7 @@ export class Poller {
         this.recordProjectResult(project.id, true)
       }
     } catch (err) {
+      logger.error(`GitLab poll failed: ${String(err)}`)
       for (const project of monitoredGitlab) {
         this.recordProjectResult(project.id, false, String(err))
       }

@@ -5,6 +5,7 @@ import type { ConfigManager } from './config-manager'
 import type { TokenStore } from './token-store'
 import * as githubClient from './github-client'
 import * as gitlabClient from './gitlab-client'
+import { logger } from './logger'
 
 const SYNC_INTERVAL_MS = 60_000
 
@@ -29,6 +30,7 @@ export class RepoSyncer {
   /** Starts the background sync timer. Performs an immediate sync first. */
   start(): void {
     if (this.timer) this.stop()
+    logger.info('Repo syncer started')
     this.sync()
     this.timer = setInterval(() => this.sync(), SYNC_INTERVAL_MS)
   }
@@ -38,11 +40,13 @@ export class RepoSyncer {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
+      logger.info('Repo syncer stopped')
     }
   }
 
   /** Triggers an immediate sync cycle. */
   async trigger(): Promise<void> {
+    logger.info('Repo sync triggered manually')
     await this.sync()
   }
 
@@ -73,6 +77,7 @@ export class RepoSyncer {
         try {
           const repos = await githubClient.fetchRepositories(token)
           all.push(...repos)
+          logger.info(`GitHub sync complete: ${repos.length} repos`)
           this.githubStatus = {
             syncing: false,
             lastSyncAt: new Date().toISOString(),
@@ -80,6 +85,7 @@ export class RepoSyncer {
             error: null,
           }
         } catch (err) {
+          logger.error(`GitHub sync failed: ${String(err)}`)
           this.githubStatus = {
             syncing: false,
             lastSyncAt: this.githubStatus?.lastSyncAt ?? null,
@@ -105,6 +111,7 @@ export class RepoSyncer {
             config.connections.gitlab.authMethod,
           )
           all.push(...repos)
+          logger.info(`GitLab sync complete: ${repos.length} projects`)
           this.gitlabStatus = {
             syncing: false,
             lastSyncAt: new Date().toISOString(),
@@ -112,6 +119,7 @@ export class RepoSyncer {
             error: null,
           }
         } catch (err) {
+          logger.error(`GitLab sync failed: ${String(err)}`)
           this.gitlabStatus = {
             syncing: false,
             lastSyncAt: this.gitlabStatus?.lastSyncAt ?? null,
