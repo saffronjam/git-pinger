@@ -6,5 +6,5 @@ The preload script runs in a sandboxed context before the renderer loads. It bri
 
 - **Typed in tsconfig.node.json**: This code compiles under the Node.js tsconfig, not the web one. DOM types are not available.
 - **contextBridge only**: All APIs exposed to the renderer must go through `contextBridge.exposeInMainWorld()`. Never expose raw Node.js APIs.
-- **Type declarations**: `index.d.ts` declares the `Window` interface extensions so the renderer can use exposed APIs with full type safety. Keep it in sync with what `index.ts` actually exposes.
+- **Type declarations**: The `.d.ts` file declares `Window` interface extensions so the renderer can use exposed APIs with full type safety. Keep it in sync with what the preload script actually exposes.
 - **Minimal surface area**: Only expose the specific IPC channels and methods the renderer needs. Don't create broad pass-through APIs.
