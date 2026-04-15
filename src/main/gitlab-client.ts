@@ -131,11 +131,23 @@ export async function pollForToken(
   clientId: string,
   deviceCode: string,
   interval: number,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const pollInterval = Math.max(interval, 5) * 1000
+  let delay = Math.max(interval, 5) * 1000
 
   return new Promise((resolve, reject) => {
-    const timer = setInterval(async () => {
+    let timeout: ReturnType<typeof setTimeout>
+
+    function schedule(): void {
+      timeout = setTimeout(poll, delay)
+    }
+
+    async function poll(): Promise<void> {
+      if (signal?.aborted) {
+        reject(new Error('OAuth flow cancelled'))
+        return
+      }
+
       try {
         const response = await fetch(`${GITLAB_COM}/oauth/token`, {
           method: 'POST',
@@ -150,21 +162,26 @@ export async function pollForToken(
         const data = (await response.json()) as GitLabTokenResponse
 
         if (data.access_token) {
-          clearInterval(timer)
           resolve(data.access_token)
-        } else if (data.error === 'authorization_pending') {
-          return
         } else if (data.error === 'slow_down') {
-          return
+          delay += 5000
+          schedule()
+        } else if (data.error === 'authorization_pending') {
+          schedule()
         } else {
-          clearInterval(timer)
           reject(new Error(data.error_description ?? data.error ?? 'Unknown error'))
         }
       } catch (err) {
-        clearInterval(timer)
         reject(err)
       }
-    }, pollInterval)
+    }
+
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timeout)
+      reject(new Error('OAuth flow cancelled'))
+    })
+
+    schedule()
   })
 }
 
