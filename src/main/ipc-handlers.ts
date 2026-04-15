@@ -228,6 +228,14 @@ export function registerIpcHandlers(
     },
   )
 
+  ipcMain.handle('config:reset', () => {
+    poller.stop()
+    repoSyncer.stop()
+    tokenStore.deleteToken('github')
+    tokenStore.deleteToken('gitlab')
+    configManager.reset()
+  })
+
   ipcMain.handle('sync:get-repos', () => {
     return repoSyncer.getRepos()
   })

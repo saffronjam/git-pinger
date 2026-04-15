@@ -37,6 +37,7 @@ const api = {
       ipcRenderer.invoke('config:set-theme', theme),
     setNotificationTemplates: (templates: NotificationTemplates): Promise<void> =>
       ipcRenderer.invoke('config:set-notification-templates', templates),
+    reset: (): Promise<void> => ipcRenderer.invoke('config:reset'),
   },
 
   sync: {

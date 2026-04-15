@@ -32,6 +32,12 @@ export class ConfigManager {
     this.pushUpdate()
   }
 
+  /** Resets all settings to factory defaults. */
+  reset(): void {
+    this.conf.store = DEFAULT_CONFIG
+    this.pushUpdate()
+  }
+
   /** Sets the GitHub connection info (not the token — that's in token-store). */
   setGitHubConnection(connection: GitHubConnection | null): void {
     this.conf.set('connections', {

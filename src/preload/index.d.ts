@@ -26,6 +26,7 @@ interface GitPingerAPI {
     setLookbackMinutes(minutes: number): Promise<void>
     setTheme(theme: AppConfig['theme']): Promise<void>
     setNotificationTemplates(templates: NotificationTemplates): Promise<void>
+    reset(): Promise<void>
   }
   sync: {
     getRepos(): Promise<AvailableProject[]>

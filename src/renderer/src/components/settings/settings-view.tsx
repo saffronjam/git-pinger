@@ -4,6 +4,17 @@ import { AppShell } from '@/components/layout/app-shell'
 import { AppHeader } from '@/components/layout/app-header'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { useConfig } from '@/hooks/use-config'
 import { ConnectionCard } from './connection-card'
 import { PollIntervalSetting } from './poll-interval-setting'
@@ -116,6 +127,47 @@ export function SettingsView({ onBack }: SettingsViewProps): ReactNode {
           <Separator />
 
           <NotificationTemplateSetting templates={config?.notifications ?? DEFAULT_TEMPLATES} />
+        </section>
+
+        <Separator />
+
+        <section>
+          <div className="rounded-lg border border-red-500/50 bg-black p-4">
+            <h3 className="mb-3 text-sm font-medium text-red-500">Danger Zone</h3>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-neutral-200">Reset settings</p>
+                <p className="text-xs text-neutral-400">
+                  Restore all settings to factory defaults and remove all connections
+                </p>
+              </div>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm">
+                    Reset
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Reset all settings?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will restore all settings to their defaults, remove all provider
+                      connections, and clear your monitored projects. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={() => window.api.config.reset()}
+                    >
+                      Reset everything
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
         </section>
       </div>
     </AppShell>

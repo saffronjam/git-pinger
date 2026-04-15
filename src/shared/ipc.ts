@@ -73,6 +73,7 @@ export interface IpcInvokeChannels {
   'config:set-lookback-minutes': [args: [minutes: number], result: void]
   'config:set-theme': [args: [theme: AppConfig['theme']], result: void]
   'config:set-notification-templates': [args: [templates: NotificationTemplates], result: void]
+  'config:reset': [args: [], result: void]
   'sync:get-repos': [args: [], result: AvailableProject[]]
   'sync:get-status': [args: [], result: SyncStatus]
   'sync:trigger': [args: [], result: void]
