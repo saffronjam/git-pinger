@@ -11,6 +11,7 @@ The renderer is a standard React app running in Chromium. It uses shadcn/ui comp
 - **shadcn/ui**: Add components via `bunx shadcn@latest add <component>`. They land in `components/ui/`.
 - **Tailwind CSS v4**: Configured via `@tailwindcss/vite` plugin. CSS variables for theming are in `assets/`.
 - **Dark/light mode**: Managed by a `ThemeProvider` hook. Uses a CSS class strategy (`.dark` on `<html>`). Always test both themes.
+- **No hardcoded colors**: Never use fixed color classes like `bg-black`, `text-neutral-200`, `text-white`, etc. Always use theme-aware tokens (`bg-background`, `text-foreground`, `text-muted-foreground`, `bg-muted`, etc.) so the UI works in both light and dark mode.
 
 ## Key Constraints
 

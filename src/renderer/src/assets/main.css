@@ -86,6 +86,9 @@
 @layer base {
   * {
     @apply border-border;
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease;
   }
 
   :root {
@@ -98,6 +101,9 @@
 
   body {
     @apply bg-background text-foreground;
+    transition:
+      color 0.2s ease,
+      background-color 0.2s ease;
     font-family:
       Inter,
       -apple-system,

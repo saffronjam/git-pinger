@@ -38,7 +38,7 @@ export function LookbackSetting({ value, onChange }: LookbackSettingProps): Reac
         <p className="text-xs text-muted-foreground">How far back to check on startup</p>
       </div>
       <Select value={String(value)} onValueChange={handleChange}>
-        <SelectTrigger className="w-40">
+        <SelectTrigger className="w-48">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

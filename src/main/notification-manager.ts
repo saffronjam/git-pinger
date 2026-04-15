@@ -48,8 +48,10 @@ export function showNotification(event: DetectedEvent, config: AppConfig): void 
   activeNotifications.add(notification)
 
   notification.on('click', () => {
-    shell.openExternal(event.url)
     activeNotifications.delete(notification)
+    setImmediate(() => {
+      shell.openExternal(event.url).catch(() => {})
+    })
   })
 
   notification.on('close', () => {

@@ -57,6 +57,14 @@ function SyncDetail({ status }: { status: ProviderSyncStatus | null }): ReactNod
   )
 }
 
+/** Returns a status dot color based on sync state. */
+function syncStatusColor(status: ProviderSyncStatus | null | undefined): string {
+  if (!status) return 'bg-muted'
+  if (status.syncing) return ''
+  if (status.error) return 'bg-red-500'
+  return 'bg-emerald-500'
+}
+
 /** Clickable provider badge that shows sync/poller status in a popover. */
 export function ProviderStatusPopover({
   provider,
@@ -68,6 +76,7 @@ export function ProviderStatusPopover({
   const providerSync = provider === 'github' ? syncStatus?.github : syncStatus?.gitlab
   const Icon = provider === 'github' ? GitHubIcon : GitLabIcon
   const isSyncing = providerSync?.syncing === true
+  const dotColor = syncStatusColor(providerSync)
 
   const handleSyncNow = useCallback(() => {
     window.api.sync.trigger()
@@ -76,18 +85,26 @@ export function ProviderStatusPopover({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors hover:bg-accent">
-          <Icon className="size-3" />
-          {username}
-          {isSyncing && <Loader2 className="size-2.5 animate-spin" />}
+        <button className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold transition-colors hover:bg-accent">
+          <Icon className="size-3.5" />
+          <div className="flex size-2.5 items-center justify-center">
+            {isSyncing ? (
+              <Loader2 className="size-2.5 animate-spin text-muted-foreground" />
+            ) : (
+              <div className={`size-2 rounded-full ${dotColor}`} />
+            )}
+          </div>
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64" align="end">
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">
-              {provider === 'github' ? 'GitHub' : 'GitLab'}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">
+                {provider === 'github' ? 'GitHub' : 'GitLab'}
+              </span>
+              <span className="text-xs text-muted-foreground">{username}</span>
+            </div>
             <Button variant="ghost" size="icon-xs" onClick={handleSyncNow} disabled={isSyncing}>
               <RefreshCw className={`size-3 ${isSyncing ? 'animate-spin' : ''}`} />
             </Button>

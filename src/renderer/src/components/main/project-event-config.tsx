@@ -37,7 +37,7 @@ export function ProjectEventConfig({ events, onUpdate }: ProjectEventConfigProps
 
 /** Short labels for chips displayed on the project row. */
 export const EVENT_CHIP_LABELS: Record<keyof NotificationEventFlags, string> = {
-  prCreated: 'Created',
+  prCreated: 'PR created',
   prAssigned: 'Assigned',
   prReviewRequested: 'Review',
 }
