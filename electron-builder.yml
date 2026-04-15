@@ -20,6 +20,7 @@ linux:
   target:
     - AppImage
     - deb
+  executableName: git-pinger
   maintainer: saffronjam
   category: Utility
 appImage:
