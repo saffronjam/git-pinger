@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun run typecheck
+      - run: electron-vite build
+      - run: electron-builder --linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+
+  build-mac:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+      - run: bun install --frozen-lockfile
+      - run: electron-vite build
+      - run: electron-builder --mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-artifacts
+          path: dist/*.dmg
+
+  release:
+    name: Create Release
+    needs: [build-linux, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          body: 'Early bleeding-edge build. Expect rough edges.'
+          files: artifacts/*

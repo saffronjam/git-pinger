@@ -1,4 +1,7 @@
-.PHONY: lint format typecheck prepare-for-commit dev package-mac package-linux
+.PHONY: deps lint format typecheck prepare-for-commit dev package-mac package-linux
+
+deps:
+	bun install
 
 lint:
 	bunx oxlint .
@@ -14,9 +17,9 @@ prepare-for-commit: format lint typecheck
 dev:
 	bun run dev
 
-package-mac:
+package-mac: deps
 	bun run build:mac
 	codesign --force --deep --sign - dist/mac-arm64/GitPinger.app
 
-package-linux:
+package-linux: deps
 	bun run build:linux
