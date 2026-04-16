@@ -30,10 +30,10 @@
 
 Grab the latest release for your platform:
 
-| Platform | Download |
-|----------|----------|
-| macOS | [`.dmg`](https://github.com/saffronjam/git-pinger/releases/latest) |
-| Linux | [`.AppImage`](https://github.com/saffronjam/git-pinger/releases/latest) / [`.deb`](https://github.com/saffronjam/git-pinger/releases/latest) |
+| Platform | Download                                                                                                                                     |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS    | [`.dmg`](https://github.com/saffronjam/git-pinger/releases/latest)                                                                           |
+| Linux    | [`.AppImage`](https://github.com/saffronjam/git-pinger/releases/latest) / [`.deb`](https://github.com/saffronjam/git-pinger/releases/latest) |
 
 ## Development
 
