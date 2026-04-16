@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="resources/branding.png" alt="GitPinger screenshot" width="600">
+  <img src="resources/app.png" alt="GitPinger screenshot" width="600">
 </p>
 
 ## Features
