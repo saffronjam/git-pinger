@@ -1,5 +1,6 @@
 import type { AvailableProject } from '../shared/project'
 import type { ValidateTokenResult } from '../shared/ipc'
+import { ApiError, paginate, request } from './http-client'
 
 const GITLAB_COM = 'https://gitlab.com'
 
@@ -24,6 +25,8 @@ interface GitLabDeviceCodeResponse {
 
 interface GitLabTokenResponse {
   access_token?: string
+  refresh_token?: string
+  expires_in?: number
   error?: string
   error_description?: string
 }
@@ -46,6 +49,12 @@ export interface DeviceFlowResult {
   interval: number
 }
 
+export interface OAuthTokenResult {
+  accessToken: string
+  refreshToken: string | null
+  expiresAt: string | null
+}
+
 export interface GitLabMRItem {
   id: string
   title: string
@@ -57,8 +66,17 @@ export interface GitLabMRItem {
 }
 
 /** Normalizes the instance URL to remove trailing slashes. */
-function normalizeUrl(instanceUrl: string): string {
+export function normalizeUrl(instanceUrl: string): string {
   return instanceUrl.replace(/\/+$/, '')
+}
+
+function authHeaders(token: string, method: 'oauth' | 'pat'): Record<string, string> {
+  return method === 'oauth' ? { Authorization: `Bearer ${token}` } : { 'PRIVATE-TOKEN': token }
+}
+
+function expiresAtFromSeconds(expiresIn: number | undefined): string | null {
+  if (!expiresIn || !Number.isFinite(expiresIn)) return null
+  return new Date(Date.now() + expiresIn * 1000).toISOString()
 }
 
 /** Validates a GitLab PAT by fetching the authenticated user. */
@@ -68,15 +86,20 @@ export async function validatePat(
 ): Promise<ValidateTokenResult> {
   try {
     const base = normalizeUrl(instanceUrl)
-    const response = await fetch(`${base}/api/v4/user`, {
-      headers: { 'PRIVATE-TOKEN': token },
+    const user = await request<GitLabUser>(`${base}/api/v4/user`, {
+      operation: 'gitlab.validatePat',
+      provider: 'gitlab',
+      headers: authHeaders(token, 'pat'),
     })
-    if (!response.ok) {
-      return { valid: false, username: null, error: `GitLab returned ${response.status}` }
-    }
-    const user = (await response.json()) as GitLabUser
     return { valid: true, username: user.username, error: null }
   } catch (err) {
+    if (err instanceof ApiError) {
+      return {
+        valid: false,
+        username: null,
+        error: `GitLab returned ${err.status ?? 'network error'}`,
+      }
+    }
     return { valid: false, username: null, error: String(err) }
   }
 }
@@ -88,35 +111,33 @@ export async function validateOAuthToken(
 ): Promise<ValidateTokenResult> {
   try {
     const base = normalizeUrl(instanceUrl)
-    const response = await fetch(`${base}/api/v4/user`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const user = await request<GitLabUser>(`${base}/api/v4/user`, {
+      operation: 'gitlab.validateOAuthToken',
+      provider: 'gitlab',
+      headers: authHeaders(token, 'oauth'),
     })
-    if (!response.ok) {
-      return { valid: false, username: null, error: `GitLab returned ${response.status}` }
-    }
-    const user = (await response.json()) as GitLabUser
     return { valid: true, username: user.username, error: null }
   } catch (err) {
+    if (err instanceof ApiError) {
+      return {
+        valid: false,
+        username: null,
+        error: `GitLab returned ${err.status ?? 'network error'}`,
+      }
+    }
     return { valid: false, username: null, error: String(err) }
   }
 }
 
 /** Initiates the GitLab OAuth Device Flow (gitlab.com only). */
 export async function startDeviceFlow(clientId: string): Promise<DeviceFlowResult> {
-  const response = await fetch(`${GITLAB_COM}/oauth/authorize_device`, {
+  const data = await request<GitLabDeviceCodeResponse>(`${GITLAB_COM}/oauth/authorize_device`, {
+    operation: 'gitlab.startDeviceFlow',
+    provider: 'gitlab',
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: clientId,
-      scope: 'read_api',
-    }),
+    body: JSON.stringify({ client_id: clientId, scope: 'read_api' }),
   })
-
-  if (!response.ok) {
-    throw new Error(`GitLab device flow initiation failed: ${response.status}`)
-  }
-
-  const data = (await response.json()) as GitLabDeviceCodeResponse
   return {
     deviceCode: data.device_code,
     userCode: data.user_code,
@@ -126,13 +147,13 @@ export async function startDeviceFlow(clientId: string): Promise<DeviceFlowResul
   }
 }
 
-/** Polls GitLab for the OAuth token after user authorization. */
+/** Polls GitLab for the OAuth token. Returns access + refresh token and derived expiry. */
 export async function pollForToken(
   clientId: string,
   deviceCode: string,
   interval: number,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<OAuthTokenResult> {
   let delay = Math.max(interval, 5) * 1000
 
   return new Promise((resolve, reject) => {
@@ -149,7 +170,9 @@ export async function pollForToken(
       }
 
       try {
-        const response = await fetch(`${GITLAB_COM}/oauth/token`, {
+        const data = await request<GitLabTokenResponse>(`${GITLAB_COM}/oauth/token`, {
+          operation: 'gitlab.pollForToken',
+          provider: 'gitlab',
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -157,12 +180,15 @@ export async function pollForToken(
             device_code: deviceCode,
             grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
           }),
+          signal,
         })
 
-        const data = (await response.json()) as GitLabTokenResponse
-
         if (data.access_token) {
-          resolve(data.access_token)
+          resolve({
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token ?? null,
+            expiresAt: expiresAtFromSeconds(data.expires_in),
+          })
         } else if (data.error === 'slow_down') {
           delay += 5000
           schedule()
@@ -172,6 +198,19 @@ export async function pollForToken(
           reject(new Error(data.error_description ?? data.error ?? 'Unknown error'))
         }
       } catch (err) {
+        if (err instanceof ApiError) {
+          // GitLab sometimes returns 400 with {error: 'authorization_pending'} in the body.
+          const body = err.bodyPreview ?? ''
+          if (body.includes('authorization_pending')) {
+            schedule()
+            return
+          }
+          if (body.includes('slow_down')) {
+            delay += 5000
+            schedule()
+            return
+          }
+        }
         reject(err)
       }
     }
@@ -185,44 +224,63 @@ export async function pollForToken(
   })
 }
 
-/** Fetches projects the user is a member of. */
+/** Exchanges a refresh token for a new access token pair. */
+export async function refreshOAuthToken(
+  clientId: string,
+  refreshToken: string,
+): Promise<OAuthTokenResult> {
+  const data = await request<GitLabTokenResponse>(`${GITLAB_COM}/oauth/token`, {
+    operation: 'gitlab.refreshOAuthToken',
+    provider: 'gitlab',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: clientId,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  })
+  if (!data.access_token) {
+    throw new Error(data.error_description ?? data.error ?? 'Refresh failed: no access_token')
+  }
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? refreshToken,
+    expiresAt: expiresAtFromSeconds(data.expires_in),
+  }
+}
+
+/** Fetches projects the user is a member of. Throws ApiError on any non-OK page. */
 export async function fetchProjects(
   token: string,
   instanceUrl: string,
   authMethod: 'oauth' | 'pat',
+  onUnauthorized?: () => Promise<string | null>,
 ): Promise<AvailableProject[]> {
   const base = normalizeUrl(instanceUrl)
-  const projects: AvailableProject[] = []
-  let page = 1
   const perPage = 100
-  const headers =
-    authMethod === 'oauth' ? { Authorization: `Bearer ${token}` } : { 'PRIVATE-TOKEN': token }
 
-  while (true) {
-    const response = await fetch(
+  const raw = await paginate<GitLabProject>(
+    (page) =>
       `${base}/api/v4/projects?membership=true&per_page=${perPage}&order_by=updated_at&page=${page}`,
-      { headers },
-    )
+    {
+      operation: 'gitlab.fetchProjects',
+      provider: 'gitlab',
+      headers: authHeaders(token, authMethod),
+      onUnauthorized,
+      rebuildHeaders: (newToken) => authHeaders(newToken, authMethod),
+    },
+    perPage,
+    10,
+  )
 
-    if (!response.ok) break
-
-    const data = (await response.json()) as GitLabProject[]
-    for (const project of data) {
-      projects.push({
-        id: `gitlab:${project.id}`,
-        provider: 'gitlab',
-        fullName: project.path_with_namespace,
-        name: project.name,
-        webUrl: project.web_url,
-      })
-    }
-
-    if (data.length < perPage) break
-    page++
-    if (page > 10) break
-  }
-
-  return projects
+  return raw.map((project) => ({
+    id: `gitlab:${project.id}`,
+    provider: 'gitlab',
+    fullName: project.path_with_namespace,
+    name: project.name,
+    webUrl: project.web_url,
+  }))
 }
 
 /** Fetches merge requests for a given scope (assigned or review). */
@@ -232,10 +290,9 @@ export async function fetchMergeRequests(
   authMethod: 'oauth' | 'pat',
   scope: 'assigned_to_me' | 'reviews_for_me',
   since: string | null,
+  onUnauthorized?: () => Promise<string | null>,
 ): Promise<GitLabMRItem[]> {
   const base = normalizeUrl(instanceUrl)
-  const headers =
-    authMethod === 'oauth' ? { Authorization: `Bearer ${token}` } : { 'PRIVATE-TOKEN': token }
 
   const params = new URLSearchParams({
     scope,
@@ -244,12 +301,17 @@ export async function fetchMergeRequests(
   })
   if (since) params.set('updated_after', since)
 
-  const response = await fetch(`${base}/api/v4/merge_requests?${params.toString()}`, { headers })
-  if (!response.ok) {
-    throw new Error(`GitLab MR request failed: ${response.status}`)
-  }
+  const data = await request<GitLabMergeRequest[]>(
+    `${base}/api/v4/merge_requests?${params.toString()}`,
+    {
+      operation: `gitlab.fetchMergeRequests.${scope}`,
+      provider: 'gitlab',
+      headers: authHeaders(token, authMethod),
+      onUnauthorized,
+      rebuildHeaders: (newToken) => authHeaders(newToken, authMethod),
+    },
+  )
 
-  const data = (await response.json()) as GitLabMergeRequest[]
   return data.map((mr) => ({
     id: `gitlab:mr:${mr.id}`,
     title: mr.title,
