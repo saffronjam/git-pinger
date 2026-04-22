@@ -5,6 +5,7 @@ export type AuthMethod = 'oauth' | 'pat'
 export interface GitHubConnection {
   provider: 'github'
   username: string
+  needsReauth?: boolean
 }
 
 export interface GitLabConnection {
@@ -12,6 +13,7 @@ export interface GitLabConnection {
   instanceUrl: string
   username: string
   authMethod: AuthMethod
+  needsReauth?: boolean
 }
 
 export type ProviderConnection = GitHubConnection | GitLabConnection

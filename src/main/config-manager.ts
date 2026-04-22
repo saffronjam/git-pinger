@@ -65,6 +65,24 @@ export class ConfigManager {
     }
   }
 
+  /** Flips the needsReauth flag on an existing provider connection. No-op if disconnected. */
+  setNeedsReauth(provider: Provider, needsReauth: boolean): void {
+    const connections = this.conf.get('connections')
+    if (provider === 'github' && connections.github) {
+      this.conf.set('connections', {
+        ...connections,
+        github: { ...connections.github, needsReauth },
+      })
+      this.pushUpdate()
+    } else if (provider === 'gitlab' && connections.gitlab) {
+      this.conf.set('connections', {
+        ...connections,
+        gitlab: { ...connections.gitlab, needsReauth },
+      })
+      this.pushUpdate()
+    }
+  }
+
   /** Sets the list of monitored projects. */
   setMonitoredProjects(projects: MonitoredProject[]): void {
     this.conf.set('monitoredProjects', projects)
