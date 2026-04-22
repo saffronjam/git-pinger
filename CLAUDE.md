@@ -26,13 +26,15 @@ bun run build            # Typecheck + build all three targets (main/preload/ren
 bun run typecheck        # Run both node + web typechecks
 bun run typecheck:node   # Check main + preload (tsconfig.node.json)
 bun run typecheck:web    # Check renderer (tsconfig.web.json)
+bun run test             # Run bun:test across src (main-process unit tests)
+bun run test:watch       # Re-run tests on file changes
 bun run lint             # oxlint
 bun run lint:fix         # oxlint --fix
 bun run format           # oxfmt --write
 bun run format:check     # oxfmt --check (CI mode)
 bun run build:mac        # Build for macOS
 bun run build:linux      # Build for Linux
-make prepare-for-commit  # Run format + lint + typecheck (use before committing)
+make prepare-for-commit  # Run format + lint + typecheck + test (use before committing)
 ```
 
 ## Code Style Rules
@@ -105,10 +107,16 @@ Theme is managed by a `ThemeProvider` hook that applies a `.dark` class on `<htm
 ### Key Patterns
 
 - **Notification GC bug (macOS)**: Always hold a reference to `Notification` objects until click/close fires, or event handlers get garbage-collected after ~1-2 minutes
+- **Notification icon (macOS)**: The small sender avatar in macOS banners is _always_ the delivering bundle's `CFBundleIconFile` — `UNUserNotificationCenter` has no per-notification override. Electron's `icon` option becomes an attachment (right-side thumbnail) on macOS, not the avatar. Dev mode runs from `node_modules/electron/dist/Electron.app` (bundle id `com.github.Electron`), so banners show the Electron atom; the packaged app uses our `appId`/`icon.icns` and shows the correct icon. No code fix — run the packaged build to verify. See electron/electron#1025.
 - **Adding shadcn components**: `bunx shadcn@latest add <component>` — components land in `src/renderer/src/components/ui/`
 - **IPC typing**: All IPC channels and types are defined in `src/shared/`. Preload exposes `window.api` with typed methods.
 - **Environment variables**: `MAIN_VITE_GITHUB_CLIENT_ID` and `MAIN_VITE_GITLAB_CLIENT_ID` for OAuth. Use `MAIN_VITE_` prefix for main process, `RENDERER_VITE_` for renderer.
 - **Shared types**: `src/shared/` contains type-only definitions importable by both tsconfigs. No runtime code — only types, interfaces, and const values.
+- **HTTP calls go through the shared `http-client`**: never call `fetch` directly from provider code. The client classifies failures as typed `ApiError` (`unauthorized`, `forbidden`, `not_found`, `rate_limited`, `server`, `network`, `other`) and logs every request/response with structured context. Pagination loops throw on non-OK responses — no silent breaks.
+- **Token refresh**: GitLab OAuth tokens carry `refreshToken` / `expiresAt`. The `AuthRefresher` is wired as `onUnauthorized` on GitLab HTTP calls — on 401 it refreshes transparently, and only flips `connection.needsReauth` if refresh fails (or isn't available for PAT auth).
+- **Structured logging**: `logger.info(message, context?)` where context is an object of key/value pairs. Context is rendered into log lines and retained in the in-memory buffer surfaced in the UI log viewer.
+- **Service lifecycle**: After any config change (auth, disconnect, monitored project add/remove), call `syncServicesToConfig(configManager, poller, repoSyncer)` from `service-manager.ts` instead of manual start/stop.
+- **Tests**: `bun test` runs `*.test.ts` files co-located with sources. `src/main/test-helpers.ts` installs a routable `globalThis.fetch` stub — always call `installFetchMock` / `resetFetchMock` in `beforeEach` / `afterEach`. Main-process classes that need Electron APIs (token store, notifications) take those as constructor injections so tests don't load the `electron` module.
 
 ### UX Flow
 
@@ -122,3 +130,4 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push to main and PRs:
 - **lint**: `bun run lint` (oxlint)
 - **format**: `bun run format:check` (oxfmt)
 - **typecheck**: `bun run typecheck` (tsc for both node + web targets)
+- **test**: `bun run test` (bun:test unit suite)

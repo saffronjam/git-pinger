@@ -1,4 +1,4 @@
-.PHONY: deps lint format typecheck prepare-for-commit dev package-mac package-linux
+.PHONY: deps lint format typecheck test prepare-for-commit dev package-mac package-linux
 
 deps:
 	bun install
@@ -12,7 +12,10 @@ format:
 typecheck:
 	bun run typecheck
 
-prepare-for-commit: format lint typecheck
+test:
+	bun test
+
+prepare-for-commit: format lint typecheck test
 
 dev:
 	bun run dev

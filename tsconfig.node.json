@@ -6,6 +6,6 @@
     "noImplicitAny": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "types": ["electron-vite/node"]
+    "types": ["electron-vite/node", "bun"]
   }
 }
