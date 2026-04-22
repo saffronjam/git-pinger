@@ -1,42 +1,95 @@
-import { app, safeStorage } from 'electron'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { Provider } from '../shared/provider'
 
+export type StoredToken =
+  | { kind: 'raw'; value: string }
+  | {
+      kind: 'oauth'
+      accessToken: string
+      refreshToken: string | null
+      expiresAt: string | null
+    }
+
 interface TokenData {
-  github: string | null
-  gitlab: string | null
+  github: StoredToken | null
+  gitlab: StoredToken | null
 }
 
-/** Encrypts and stores authentication tokens using Electron's safeStorage API. */
+export interface SafeStorageLike {
+  isEncryptionAvailable(): boolean
+  encryptString(plain: string): Buffer
+  decryptString(enc: Buffer): string
+}
+
+/** Migrates a persisted token value (legacy string or modern object) to the StoredToken shape. */
+function migrateEntry(raw: unknown): StoredToken | null {
+  if (raw === null || raw === undefined) return null
+  if (typeof raw === 'string') return { kind: 'raw', value: raw }
+  if (typeof raw === 'object' && raw !== null && 'kind' in raw) {
+    const obj = raw as { kind: string } & Record<string, unknown>
+    if (obj.kind === 'raw' && typeof obj.value === 'string') {
+      return { kind: 'raw', value: obj.value }
+    }
+    if (obj.kind === 'oauth' && typeof obj.accessToken === 'string') {
+      return {
+        kind: 'oauth',
+        accessToken: obj.accessToken,
+        refreshToken: typeof obj.refreshToken === 'string' ? obj.refreshToken : null,
+        expiresAt: typeof obj.expiresAt === 'string' ? obj.expiresAt : null,
+      }
+    }
+  }
+  return null
+}
+
+/** Encrypts and stores authentication tokens on disk via an injected storage backend. */
 export class TokenStore {
-  private filePath: string
   private cache: TokenData | null = null
 
-  constructor() {
-    const dir = join(app.getPath('userData'), 'tokens')
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true })
-    }
-    this.filePath = join(dir, 'tokens.enc')
-  }
+  constructor(
+    private filePath: string,
+    private storage: SafeStorageLike,
+  ) {}
 
-  /** Checks whether the OS keychain-based encryption is available. */
+  /** Checks whether the underlying encryption backend is available. */
   isAvailable(): boolean {
-    return safeStorage.isEncryptionAvailable()
+    return this.storage.isEncryptionAvailable()
   }
 
-  /** Encrypts and saves a token for the given provider. */
+  /** Encrypts and saves a raw string token (PAT-style) for the given provider. */
   saveToken(provider: Provider, token: string): void {
     const data = this.load()
-    data[provider] = token
+    data[provider] = { kind: 'raw', value: token }
     this.save(data)
   }
 
-  /** Decrypts and returns the token for the given provider, or null if not stored. */
-  getToken(provider: Provider): string | null {
+  /** Saves an OAuth token bundle for the given provider. */
+  saveOAuthToken(
+    provider: Provider,
+    entry: { accessToken: string; refreshToken: string | null; expiresAt: string | null },
+  ): void {
     const data = this.load()
-    return data[provider]
+    data[provider] = { kind: 'oauth', ...entry }
+    this.save(data)
+  }
+
+  /** Returns the access token string (raw value or OAuth access token), or null. */
+  getToken(provider: Provider): string | null {
+    const entry = this.getEntry(provider)
+    if (!entry) return null
+    return entry.kind === 'raw' ? entry.value : entry.accessToken
+  }
+
+  /** Returns the full stored token entry for the given provider. */
+  getEntry(provider: Provider): StoredToken | null {
+    return this.load()[provider]
+  }
+
+  /** Returns the refresh token for an OAuth entry, or null for raw/missing entries. */
+  getRefreshToken(provider: Provider): string | null {
+    const entry = this.getEntry(provider)
+    if (!entry || entry.kind !== 'oauth') return null
+    return entry.refreshToken
   }
 
   /** Deletes the stored token for the given provider. */
@@ -48,8 +101,7 @@ export class TokenStore {
 
   /** Returns whether a token exists for the given provider. */
   hasToken(provider: Provider): boolean {
-    const data = this.load()
-    return data[provider] !== null
+    return this.getEntry(provider) !== null
   }
 
   /** Loads and decrypts the token data. Uses in-memory cache after first read. */
@@ -66,8 +118,12 @@ export class TokenStore {
     }
 
     const encrypted = readFileSync(this.filePath)
-    const json = safeStorage.decryptString(encrypted)
-    this.cache = JSON.parse(json) as TokenData
+    const json = this.storage.decryptString(encrypted)
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    this.cache = {
+      github: migrateEntry(parsed['github']),
+      gitlab: migrateEntry(parsed['gitlab']),
+    }
     return this.cache
   }
 
@@ -79,7 +135,7 @@ export class TokenStore {
 
     this.cache = data
     const json = JSON.stringify(data)
-    const encrypted = safeStorage.encryptString(json)
+    const encrypted = this.storage.encryptString(json)
     writeFileSync(this.filePath, encrypted)
   }
 }
