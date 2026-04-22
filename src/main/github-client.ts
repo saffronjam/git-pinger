@@ -1,5 +1,6 @@
 import type { AvailableProject } from '../shared/project'
 import type { ValidateTokenResult } from '../shared/ipc'
+import { ApiError, paginate, request } from './http-client'
 
 const API_BASE = 'https://api.github.com'
 
@@ -62,37 +63,40 @@ export interface GitHubPRItem {
   updatedAt: string
 }
 
+function githubHeaders(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }
+}
+
 /** Validates a GitHub token by fetching the authenticated user. */
 export async function validateToken(token: string): Promise<ValidateTokenResult> {
   try {
-    const response = await fetch(`${API_BASE}/user`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    const user = await request<GitHubUser>(`${API_BASE}/user`, {
+      operation: 'github.validateToken',
+      provider: 'github',
+      headers: githubHeaders(token),
     })
-    if (!response.ok) {
-      return { valid: false, username: null, error: `GitHub returned ${response.status}` }
-    }
-    const user = (await response.json()) as GitHubUser
     return { valid: true, username: user.login, error: null }
   } catch (err) {
+    if (err instanceof ApiError) {
+      return {
+        valid: false,
+        username: null,
+        error: `GitHub returned ${err.status ?? 'network error'}`,
+      }
+    }
     return { valid: false, username: null, error: String(err) }
   }
 }
 
 /** Initiates the GitHub OAuth Device Flow. */
 export async function startDeviceFlow(clientId: string): Promise<DeviceFlowResult> {
-  const response = await fetch('https://github.com/login/device/code', {
+  const data = await request<GitHubDeviceCodeResponse>('https://github.com/login/device/code', {
+    operation: 'github.startDeviceFlow',
+    provider: 'github',
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: clientId,
-    }),
+    body: JSON.stringify({ client_id: clientId }),
   })
-
-  if (!response.ok) {
-    throw new Error(`GitHub device flow initiation failed: ${response.status}`)
-  }
-
-  const data = (await response.json()) as GitHubDeviceCodeResponse
   return {
     deviceCode: data.device_code,
     userCode: data.user_code,
@@ -125,17 +129,21 @@ export async function pollForToken(
       }
 
       try {
-        const response = await fetch('https://github.com/login/oauth/access_token', {
-          method: 'POST',
-          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            client_id: clientId,
-            device_code: deviceCode,
-            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-          }),
-        })
-
-        const data = (await response.json()) as GitHubTokenResponse
+        const data = await request<GitHubTokenResponse>(
+          'https://github.com/login/oauth/access_token',
+          {
+            operation: 'github.pollForToken',
+            provider: 'github',
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client_id: clientId,
+              device_code: deviceCode,
+              grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+            }),
+            signal,
+          },
+        )
 
         if (data.access_token) {
           resolve(data.access_token)
@@ -163,40 +171,27 @@ export async function pollForToken(
 
 /** Fetches repositories accessible to the authenticated user. */
 export async function fetchRepositories(token: string): Promise<AvailableProject[]> {
-  const repos: AvailableProject[] = []
-  let page = 1
   const perPage = 100
-
-  while (true) {
-    const response = await fetch(
-      `${API_BASE}/user/repos?per_page=${perPage}&sort=updated&page=${page}`,
-      {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      },
-    )
-
-    if (!response.ok) break
-
-    const data = (await response.json()) as GitHubRepo[]
-    for (const repo of data) {
-      repos.push({
-        id: `github:${repo.id}`,
-        provider: 'github',
-        fullName: repo.full_name,
-        name: repo.name,
-        webUrl: repo.html_url,
-      })
-    }
-
-    if (data.length < perPage) break
-    page++
-    if (page > 10) break
-  }
-
-  return repos
+  const raw = await paginate<GitHubRepo>(
+    (page) => `${API_BASE}/user/repos?per_page=${perPage}&sort=updated&page=${page}`,
+    {
+      operation: 'github.fetchRepositories',
+      provider: 'github',
+      headers: githubHeaders(token),
+    },
+    perPage,
+    10,
+  )
+  return raw.map((repo) => ({
+    id: `github:${repo.id}`,
+    provider: 'github',
+    fullName: repo.full_name,
+    name: repo.name,
+    webUrl: repo.html_url,
+  }))
 }
 
-/** Fetches open pull requests for a specific repository, optionally updated since a timestamp. */
+/** Fetches open pull requests for a specific repository, optionally filtered by a `since` timestamp. */
 export async function fetchPullRequests(
   token: string,
   repoFullName: string,
@@ -209,15 +204,14 @@ export async function fetchPullRequests(
     per_page: '50',
   })
 
-  const response = await fetch(`${API_BASE}/repos/${repoFullName}/pulls?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-  })
-
-  if (!response.ok) {
-    throw new Error(`GitHub PR request for ${repoFullName} failed: ${response.status}`)
-  }
-
-  const data = (await response.json()) as GitHubPullRequest[]
+  const data = await request<GitHubPullRequest[]>(
+    `${API_BASE}/repos/${repoFullName}/pulls?${params.toString()}`,
+    {
+      operation: 'github.fetchPullRequests',
+      provider: 'github',
+      headers: githubHeaders(token),
+    },
+  )
 
   let filtered = data
   if (since) {
