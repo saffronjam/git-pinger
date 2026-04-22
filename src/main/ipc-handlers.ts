@@ -9,6 +9,7 @@ import type { RepoSyncer } from './repo-syncer'
 import * as githubClient from './github-client'
 import * as gitlabClient from './gitlab-client'
 import { showNotification } from './notification-manager'
+import { syncServicesToConfig } from './service-manager'
 import { logger } from './logger'
 
 /**
@@ -82,8 +83,12 @@ export function registerIpcHandlers(
       }
 
       tokenStore.saveToken('github', token)
-      configManager.setGitHubConnection({ provider: 'github', username: validation.username })
-      repoSyncer.start()
+      configManager.setGitHubConnection({
+        provider: 'github',
+        username: validation.username,
+        needsReauth: false,
+      })
+      syncServicesToConfig(configManager, poller, repoSyncer)
       logger.info(`GitHub OAuth: connected as ${validation.username}`)
 
       mainWindow.webContents.send('oauth:progress', {
@@ -143,27 +148,37 @@ export function registerIpcHandlers(
       })
 
       logger.info('GitLab OAuth: polling for token')
-      const token = await gitlabClient.pollForToken(
+      const tokenResult = await gitlabClient.pollForToken(
         clientId,
         flow.deviceCode,
         flow.interval,
         signal,
       )
-      const validation = await gitlabClient.validateOAuthToken(token, 'https://gitlab.com')
+      const validation = await gitlabClient.validateOAuthToken(
+        tokenResult.accessToken,
+        'https://gitlab.com',
+      )
 
       if (!validation.valid || !validation.username) {
         throw new Error(validation.error ?? 'Token validation failed')
       }
 
-      tokenStore.saveToken('gitlab', token)
+      tokenStore.saveOAuthToken('gitlab', {
+        accessToken: tokenResult.accessToken,
+        refreshToken: tokenResult.refreshToken,
+        expiresAt: tokenResult.expiresAt,
+      })
       configManager.setGitLabConnection({
         provider: 'gitlab',
         instanceUrl: 'https://gitlab.com',
         username: validation.username,
         authMethod: 'oauth',
+        needsReauth: false,
       })
-      repoSyncer.start()
-      logger.info(`GitLab OAuth: connected as ${validation.username}`)
+      syncServicesToConfig(configManager, poller, repoSyncer)
+      logger.info(`GitLab OAuth: connected as ${validation.username}`, {
+        hasRefreshToken: tokenResult.refreshToken !== null,
+      })
 
       mainWindow.webContents.send('oauth:progress', {
         phase: 'success',
@@ -199,8 +214,12 @@ export function registerIpcHandlers(
     }
 
     tokenStore.saveToken('github', token)
-    configManager.setGitHubConnection({ provider: 'github', username: validation.username })
-    repoSyncer.start()
+    configManager.setGitHubConnection({
+      provider: 'github',
+      username: validation.username,
+      needsReauth: false,
+    })
+    syncServicesToConfig(configManager, poller, repoSyncer)
     logger.info(`GitHub PAT: connected as ${validation.username}`)
 
     return validation
@@ -220,8 +239,9 @@ export function registerIpcHandlers(
       instanceUrl,
       username: validation.username,
       authMethod: 'pat',
+      needsReauth: false,
     })
-    repoSyncer.start()
+    syncServicesToConfig(configManager, poller, repoSyncer)
     logger.info(`GitLab PAT: connected as ${validation.username}`)
 
     return validation
@@ -236,12 +256,7 @@ export function registerIpcHandlers(
     const remaining = config.monitoredProjects.filter((p) => p.provider !== provider)
     configManager.setMonitoredProjects(remaining)
 
-    if (!config.connections.github && !config.connections.gitlab) {
-      poller.stop()
-      repoSyncer.stop()
-    } else {
-      repoSyncer.start()
-    }
+    syncServicesToConfig(configManager, poller, repoSyncer)
   })
 
   ipcMain.handle('auth:get-connections', () => {
@@ -300,14 +315,7 @@ export function registerIpcHandlers(
   ipcMain.handle('projects:set-monitored', (_event, projects: MonitoredProject[]) => {
     logger.info(`Monitored projects updated: ${projects.length} projects`)
     configManager.setMonitoredProjects(projects)
-
-    const config = configManager.get()
-    const hasConnections = config.connections.github || config.connections.gitlab
-    if (hasConnections && projects.length > 0) {
-      poller.restart()
-    } else {
-      poller.stop()
-    }
+    syncServicesToConfig(configManager, poller, repoSyncer)
   })
 
   ipcMain.handle(

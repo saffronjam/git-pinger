@@ -1,4 +1,4 @@
-import { app, nativeTheme, shell, BrowserWindow } from 'electron'
+import { app, nativeTheme, safeStorage, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -7,6 +7,10 @@ import { ConfigManager } from './config-manager'
 import { TokenStore } from './token-store'
 import { Poller } from './poller'
 import { RepoSyncer } from './repo-syncer'
+import { AuthRefresher, type ProviderRefresher } from './auth-refresher'
+import * as gitlabClient from './gitlab-client'
+import { showNotification } from './notification-manager'
+import { syncServicesToConfig } from './service-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { logger } from './logger'
 
@@ -97,9 +101,26 @@ app.whenReady().then(() => {
   })
 
   const configManager = new ConfigManager()
-  const tokenStore = new TokenStore()
-  const poller = new Poller(configManager, tokenStore)
-  const repoSyncer = new RepoSyncer(configManager, tokenStore)
+  const tokensDir = join(app.getPath('userData'), 'tokens')
+  if (!existsSync(tokensDir)) mkdirSync(tokensDir, { recursive: true })
+  const tokenStore = new TokenStore(join(tokensDir, 'tokens.enc'), safeStorage)
+
+  const gitlabClientId = import.meta.env.MAIN_VITE_GITLAB_CLIENT_ID as string | undefined
+  const authRefresher = new AuthRefresher({
+    configManager,
+    tokenStore,
+    refreshers: {
+      getRefresher: (provider): ProviderRefresher | null => {
+        if (provider === 'gitlab' && gitlabClientId) {
+          return (refreshToken) => gitlabClient.refreshOAuthToken(gitlabClientId, refreshToken)
+        }
+        return null
+      },
+    },
+  })
+
+  const poller = new Poller(configManager, tokenStore, authRefresher, showNotification)
+  const repoSyncer = new RepoSyncer(configManager, tokenStore, authRefresher)
 
   const mainWindow = createWindow()
   logger.info('Main window created')
@@ -110,18 +131,7 @@ app.whenReady().then(() => {
 
   registerIpcHandlers(configManager, tokenStore, poller, repoSyncer, mainWindow)
 
-  const config = configManager.get()
-  const hasConnections = config.connections.github !== null || config.connections.gitlab !== null
-  if (hasConnections) {
-    logger.info('Connections found, starting repo syncer')
-    repoSyncer.start()
-    if (config.monitoredProjects.length > 0) {
-      logger.info(`Starting poller for ${config.monitoredProjects.length} projects`)
-      poller.start()
-    }
-  } else {
-    logger.info('No connections configured, waiting for onboarding')
-  }
+  syncServicesToConfig(configManager, poller, repoSyncer)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
