@@ -1,4 +1,5 @@
 import type { AppConfig, NotificationTemplates } from './config'
+import type { ApiErrorKind } from './errors'
 import type { DetectedEvent } from './notification'
 import type { AvailableProject, MonitoredProject, NotificationEventFlags } from './project'
 import type { Provider } from './provider'
@@ -7,6 +8,7 @@ export interface LogEntry {
   timestamp: string
   level: 'info' | 'warn' | 'error'
   message: string
+  context?: Record<string, unknown>
 }
 
 export interface ValidateTokenResult {
@@ -54,6 +56,7 @@ export interface ProviderSyncStatus {
   lastSyncAt: string | null
   repoCount: number
   error: string | null
+  errorKind: ApiErrorKind | null
 }
 
 export interface SyncStatus {
