@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,6 +43,7 @@ export function ConnectionCard({
 
   const label = provider === 'github' ? 'GitHub' : 'GitLab'
   const Icon = provider === 'github' ? GitHubIcon : GitLabIcon
+  const needsReauth = connection?.needsReauth === true
 
   return (
     <div className="flex items-center justify-between rounded-lg border p-3">
@@ -51,11 +52,17 @@ export function ConnectionCard({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{label}</span>
-            {connection && (
-              <Badge className="bg-emerald-500/15 text-emerald-500 px-1.5 py-0 text-[10px] hover:bg-emerald-500/15">
-                Connected
-              </Badge>
-            )}
+            {connection &&
+              (needsReauth ? (
+                <Badge className="bg-amber-500/15 text-amber-500 px-1.5 py-0 text-[10px] hover:bg-amber-500/15">
+                  <AlertTriangle className="mr-1 size-3" />
+                  Token expired
+                </Badge>
+              ) : (
+                <Badge className="bg-emerald-500/15 text-emerald-500 px-1.5 py-0 text-[10px] hover:bg-emerald-500/15">
+                  Connected
+                </Badge>
+              ))}
           </div>
           <p className={`text-xs ${connection ? 'text-muted-foreground' : 'invisible'}`}>
             {connection
@@ -68,6 +75,36 @@ export function ConnectionCard({
       </div>
       {connection ? (
         <div className="flex items-center gap-2">
+          {needsReauth && (
+            <Dialog open={connectDialogOpen} onOpenChange={setConnectDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-amber-500/40 text-amber-500 hover:border-amber-500 hover:text-amber-500"
+                >
+                  <RefreshCw className="size-3.5" />
+                  Reconnect
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Icon className="size-5" />
+                    Reconnect {label}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Your {label} token has expired. Authenticate again to resume monitoring.
+                  </DialogDescription>
+                </DialogHeader>
+                <ProviderAuthForm
+                  provider={provider}
+                  instanceUrl={provider === 'gitlab' ? gitlabUrl : undefined}
+                  onInstanceUrlChange={provider === 'gitlab' ? onGitlabUrlChange : undefined}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
           <Dialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
             <DialogTrigger asChild>
               <Button

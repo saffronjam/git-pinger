@@ -31,6 +31,8 @@ function timeAgo(iso: string): string {
 function SyncDetail({ status }: { status: ProviderSyncStatus | null }): ReactNode {
   if (!status) return <p className="text-xs text-muted-foreground">Not connected</p>
 
+  const isAuthError = status.errorKind === 'unauthorized'
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -52,7 +54,11 @@ function SyncDetail({ status }: { status: ProviderSyncStatus | null }): ReactNod
           )}
         </span>
       </div>
-      {status.error && <p className="text-xs text-destructive">{status.error}</p>}
+      {isAuthError ? (
+        <p className="text-xs text-destructive">Token expired — reconnect in Settings</p>
+      ) : (
+        status.error && <p className="text-xs text-destructive">{status.error}</p>
+      )}
     </div>
   )
 }
@@ -61,6 +67,7 @@ function SyncDetail({ status }: { status: ProviderSyncStatus | null }): ReactNod
 function syncStatusColor(status: ProviderSyncStatus | null | undefined): string {
   if (!status) return 'bg-muted'
   if (status.syncing) return ''
+  if (status.errorKind === 'unauthorized') return 'bg-amber-500'
   if (status.error) return 'bg-red-500'
   return 'bg-emerald-500'
 }
