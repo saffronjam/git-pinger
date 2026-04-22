@@ -1,6 +1,7 @@
 import { Notification, shell } from 'electron'
 import type { AppConfig } from '../shared/config'
 import type { DetectedEvent } from '../shared/notification'
+import iconPath from '../../resources/icon.png?asset'
 import { logger } from './logger'
 
 const activeNotifications = new Set<Notification>()
@@ -44,7 +45,7 @@ export function showNotification(event: DetectedEvent, config: AppConfig): void 
   const title = renderTemplate(template.titleTemplate, variables)
   const body = renderTemplate(template.bodyTemplate, variables)
 
-  const notification = new Notification({ title, body })
+  const notification = new Notification({ title, body, icon: iconPath })
 
   activeNotifications.add(notification)
 

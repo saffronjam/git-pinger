@@ -99,7 +99,7 @@ export function AddProjectModal({
             autoCorrect="off"
           />
         </div>
-        <ScrollArea className="h-[400px]">
+        <ScrollArea className="h-[320px]">
           {filtered.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
               {search
