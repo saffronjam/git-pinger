@@ -2,12 +2,18 @@ import type { BrowserWindow } from 'electron'
 import type { AppConfig } from '../shared/config'
 import type { DetectedEvent } from '../shared/notification'
 import type { PollerError, PollerStatus, ProjectPollStatus } from '../shared/ipc'
+import type { AuthRefresher } from './auth-refresher'
 import type { ConfigManager } from './config-manager'
 import type { TokenStore } from './token-store'
 import * as githubClient from './github-client'
 import * as gitlabClient from './gitlab-client'
-import { showNotification } from './notification-manager'
 import { logger } from './logger'
+
+export type NotificationShower = (event: DetectedEvent, config: AppConfig) => void
+
+export type PollerConfigManager = Pick<ConfigManager, 'get'>
+export type PollerTokenStore = Pick<TokenStore, 'getToken'>
+export type PollerAuthRefresher = Pick<AuthRefresher, 'onUnauthorized'>
 
 /** Periodically polls GitHub and GitLab APIs for new events. */
 export class Poller {
@@ -17,10 +23,13 @@ export class Poller {
   private errors: PollerError[] = []
   private projectStatuses = new Map<string, ProjectPollStatus>()
   private mainWindow: BrowserWindow | null = null
+  private firstPollCompleted = false
 
   constructor(
-    private configManager: ConfigManager,
-    private tokenStore: TokenStore,
+    private configManager: PollerConfigManager,
+    private tokenStore: PollerTokenStore,
+    private authRefresher: PollerAuthRefresher,
+    private showNotification: NotificationShower,
   ) {}
 
   /** Sets the main window reference for pushing status updates. */
@@ -35,9 +44,12 @@ export class Poller {
     const config = this.configManager.get()
     const intervalMs = config.polling.intervalSeconds * 1000
 
-    logger.info(`Poller started (interval=${config.polling.intervalSeconds}s)`)
-    this.poll()
-    this.timer = setInterval(() => this.poll(), intervalMs)
+    this.firstPollCompleted = false
+    logger.info('poller.started', { intervalSeconds: config.polling.intervalSeconds })
+    void this.poll()
+    this.timer = setInterval(() => {
+      void this.poll()
+    }, intervalMs)
     this.pushStatus()
   }
 
@@ -46,7 +58,7 @@ export class Poller {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
-      logger.info('Poller stopped')
+      logger.info('poller.stopped')
     }
     this.pushStatus()
   }
@@ -75,37 +87,37 @@ export class Poller {
     }
   }
 
-  /** Restarts the timer with the current config interval. */
+  /**
+   * Stop-and-start. Safe to call from any state — if currently stopped, this simply starts.
+   * (Historically this was a no-op when stopped, which caused the poller to never wake after
+   * a project was added to a freshly reconnected provider.)
+   */
   restart(): void {
-    if (this.timer) {
-      logger.info('Poller restarting')
-      this.stop()
-      this.start()
-    }
+    logger.info('poller.restart')
+    this.stop()
+    this.start()
+  }
+
+  /** Runs one poll cycle immediately. Used for tests and future "Poll now" UI. */
+  async trigger(): Promise<void> {
+    await this.poll()
   }
 
   /** Executes one poll cycle across all connected providers. */
   private async poll(): Promise<void> {
     const config = this.configManager.get()
-
-    if (!this.lastPollAt && config.polling.lookbackMinutes === 0) {
-      this.lastPollAt = new Date().toISOString()
-      this.pushStatus()
-      return
-    }
-
-    const since = this.lastPollAt ?? this.getLookbackTimestamp(config)
+    const sinceForCreated = this.lastPollAt ?? this.getLookbackTimestamp(config)
     this.errors = []
 
     const newEvents: DetectedEvent[] = []
 
-    if (config.connections.github) {
-      const githubEvents = await this.pollGitHub(config, since)
+    if (config.connections.github && !config.connections.github.needsReauth) {
+      const githubEvents = await this.pollGitHub(config, sinceForCreated)
       newEvents.push(...githubEvents)
     }
 
-    if (config.connections.gitlab) {
-      const gitlabEvents = await this.pollGitLab(config, since)
+    if (config.connections.gitlab && !config.connections.gitlab.needsReauth) {
+      const gitlabEvents = await this.pollGitLab(config)
       newEvents.push(...gitlabEvents)
     }
 
@@ -122,26 +134,40 @@ export class Poller {
     }
 
     const unseenEvents = newEvents.filter((e) => !this.seenEvents.has(e.id))
-    for (const event of unseenEvents) {
-      this.seenEvents.set(event.id, event.timestamp)
-      showNotification(event, config)
+
+    if (!this.firstPollCompleted) {
+      for (const event of unseenEvents) {
+        this.seenEvents.set(event.id, event.timestamp)
+      }
+      logger.info('poll.first-poll-silent-init', { seededCount: unseenEvents.length })
+    } else {
+      for (const event of unseenEvents) {
+        this.seenEvents.set(event.id, event.timestamp)
+        this.showNotification(event, config)
+      }
+      logger.info('poll.complete', {
+        totalEvents: newEvents.length,
+        newEvents: unseenEvents.length,
+      })
+      if (unseenEvents.length > 0) {
+        this.pushNewEvents(unseenEvents)
+      }
     }
 
-    logger.info(`Poll complete: ${newEvents.length} events found, ${unseenEvents.length} new`)
-
-    if (unseenEvents.length > 0) {
-      this.pushNewEvents(unseenEvents)
-    }
-
+    this.firstPollCompleted = true
     this.pruneSeenEvents()
     this.pushStatus()
   }
 
-  /** Removes seen events older than 1 hour to prevent unbounded growth. */
+  /**
+   * Prunes only :created events older than 24h. :assigned / :review entries are managed by the
+   * "not in current response → delete" logic above and must not be expired by timestamp — their
+   * stored timestamp is `mr.updated_at`, which doesn't reflect when we saw them.
+   */
   private pruneSeenEvents(): void {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     for (const [id, timestamp] of this.seenEvents) {
-      if (timestamp < oneHourAgo) {
+      if (id.includes(':created:') && timestamp < cutoff) {
         this.seenEvents.delete(id)
       }
     }
@@ -165,7 +191,7 @@ export class Poller {
       this.pushStatus()
 
       try {
-        const prs = await githubClient.fetchPullRequests(token, project.fullName, since)
+        const prs = await githubClient.fetchPullRequests(token, project.fullName, null)
         const flags = eventsMap.get(project.fullName)
         if (!flags) {
           this.recordProjectResult(project.id, true)
@@ -215,7 +241,7 @@ export class Poller {
 
         this.recordProjectResult(project.id, true)
       } catch (err) {
-        logger.error(`GitHub poll failed for ${project.fullName}: ${String(err)}`)
+        logger.error('poll.github.failed', { project: project.fullName, error: String(err) })
         this.recordProjectResult(project.id, false, String(err))
         this.errors.push({
           provider: 'github',
@@ -229,7 +255,7 @@ export class Poller {
   }
 
   /** Polls GitLab for MRs relevant to monitored projects. */
-  private async pollGitLab(config: AppConfig, since: string): Promise<DetectedEvent[]> {
+  private async pollGitLab(config: AppConfig): Promise<DetectedEvent[]> {
     const token = this.tokenStore.getToken('gitlab')
     if (!token || !config.connections.gitlab) return []
 
@@ -240,6 +266,7 @@ export class Poller {
     const monitoredIds = new Set(monitoredGitlab.map((p) => p.id))
     const eventsMap = new Map(monitoredGitlab.map((p) => [p.id, p.events]))
     const namesMap = new Map(monitoredGitlab.map((p) => [p.id, p.fullName]))
+    const onUnauthorized = this.authRefresher.onUnauthorized('gitlab')
 
     const events: DetectedEvent[] = []
 
@@ -254,7 +281,8 @@ export class Poller {
         instanceUrl,
         authMethod,
         'assigned_to_me',
-        since,
+        null,
+        onUnauthorized,
       )
       for (const mr of assignedMRs) {
         const projectId = `gitlab:${mr.projectId}`
@@ -279,7 +307,8 @@ export class Poller {
         instanceUrl,
         authMethod,
         'reviews_for_me',
-        since,
+        null,
+        onUnauthorized,
       )
       for (const mr of reviewMRs) {
         const projectId = `gitlab:${mr.projectId}`
@@ -302,7 +331,7 @@ export class Poller {
         this.recordProjectResult(project.id, true)
       }
     } catch (err) {
-      logger.error(`GitLab poll failed: ${String(err)}`)
+      logger.error('poll.gitlab.failed', { error: String(err) })
       for (const project of monitoredGitlab) {
         this.recordProjectResult(project.id, false, String(err))
       }
