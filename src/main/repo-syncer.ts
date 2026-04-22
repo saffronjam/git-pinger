@@ -1,13 +1,29 @@
 import type { BrowserWindow } from 'electron'
 import type { AvailableProject } from '../shared/project'
 import type { SyncStatus, ProviderSyncStatus } from '../shared/ipc'
+import type { AuthRefresher } from './auth-refresher'
 import type { ConfigManager } from './config-manager'
 import type { TokenStore } from './token-store'
 import * as githubClient from './github-client'
 import * as gitlabClient from './gitlab-client'
+import { ApiError } from './http-client'
 import { logger } from './logger'
 
 const SYNC_INTERVAL_MS = 60_000
+
+export type SyncerConfigManager = Pick<ConfigManager, 'get'>
+export type SyncerTokenStore = Pick<TokenStore, 'getToken'>
+export type SyncerAuthRefresher = Pick<AuthRefresher, 'onUnauthorized'>
+
+function blankStatus(): ProviderSyncStatus {
+  return {
+    syncing: false,
+    lastSyncAt: null,
+    repoCount: 0,
+    error: null,
+    errorKind: null,
+  }
+}
 
 /** Background syncer that periodically fetches available repos from connected providers. */
 export class RepoSyncer {
@@ -18,8 +34,9 @@ export class RepoSyncer {
   private mainWindow: BrowserWindow | null = null
 
   constructor(
-    private configManager: ConfigManager,
-    private tokenStore: TokenStore,
+    private configManager: SyncerConfigManager,
+    private tokenStore: SyncerTokenStore,
+    private authRefresher: SyncerAuthRefresher,
   ) {}
 
   /** Sets the main window reference for pushing updates. */
@@ -30,9 +47,11 @@ export class RepoSyncer {
   /** Starts the background sync timer. Performs an immediate sync first. */
   start(): void {
     if (this.timer) this.stop()
-    logger.info('Repo syncer started')
-    this.sync()
-    this.timer = setInterval(() => this.sync(), SYNC_INTERVAL_MS)
+    logger.info('syncer.started')
+    void this.sync()
+    this.timer = setInterval(() => {
+      void this.sync()
+    }, SYNC_INTERVAL_MS)
   }
 
   /** Stops the background sync timer. */
@@ -40,13 +59,13 @@ export class RepoSyncer {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
-      logger.info('Repo syncer stopped')
+      logger.info('syncer.stopped')
     }
   }
 
   /** Triggers an immediate sync cycle. */
   async trigger(): Promise<void> {
-    logger.info('Repo sync triggered manually')
+    logger.info('syncer.triggered')
     await this.sync()
   }
 
@@ -69,29 +88,32 @@ export class RepoSyncer {
     const all: AvailableProject[] = []
 
     if (config.connections.github) {
-      this.githubStatus = { ...this.githubStatus!, syncing: true, error: null }
+      const base = this.githubStatus ?? blankStatus()
+      this.githubStatus = { ...base, syncing: true, error: null, errorKind: null }
       this.pushStatus()
 
       const token = this.tokenStore.getToken('github')
-      if (token) {
+      if (token && !config.connections.github.needsReauth) {
         try {
           const repos = await githubClient.fetchRepositories(token)
           all.push(...repos)
-          logger.info(`GitHub sync complete: ${repos.length} repos`)
+          logger.info('syncer.github.complete', { repoCount: repos.length })
           this.githubStatus = {
             syncing: false,
             lastSyncAt: new Date().toISOString(),
             repoCount: repos.length,
             error: null,
+            errorKind: null,
           }
         } catch (err) {
-          logger.error(`GitHub sync failed: ${String(err)}`)
-          this.githubStatus = {
-            syncing: false,
-            lastSyncAt: this.githubStatus?.lastSyncAt ?? null,
-            repoCount: this.githubStatus?.repoCount ?? 0,
-            error: String(err),
-          }
+          this.githubStatus = this.buildErrorStatus(this.githubStatus, err, 'github')
+        }
+      } else {
+        this.githubStatus = {
+          ...base,
+          syncing: false,
+          error: base.error ?? 'Reconnect required',
+          errorKind: base.errorKind ?? 'unauthorized',
         }
       }
     } else {
@@ -99,33 +121,37 @@ export class RepoSyncer {
     }
 
     if (config.connections.gitlab) {
-      this.gitlabStatus = { ...this.gitlabStatus!, syncing: true, error: null }
+      const base = this.gitlabStatus ?? blankStatus()
+      this.gitlabStatus = { ...base, syncing: true, error: null, errorKind: null }
       this.pushStatus()
 
       const token = this.tokenStore.getToken('gitlab')
-      if (token) {
+      if (token && !config.connections.gitlab.needsReauth) {
         try {
           const repos = await gitlabClient.fetchProjects(
             token,
             config.connections.gitlab.instanceUrl,
             config.connections.gitlab.authMethod,
+            this.authRefresher.onUnauthorized('gitlab'),
           )
           all.push(...repos)
-          logger.info(`GitLab sync complete: ${repos.length} projects`)
+          logger.info('syncer.gitlab.complete', { repoCount: repos.length })
           this.gitlabStatus = {
             syncing: false,
             lastSyncAt: new Date().toISOString(),
             repoCount: repos.length,
             error: null,
+            errorKind: null,
           }
         } catch (err) {
-          logger.error(`GitLab sync failed: ${String(err)}`)
-          this.gitlabStatus = {
-            syncing: false,
-            lastSyncAt: this.gitlabStatus?.lastSyncAt ?? null,
-            repoCount: this.gitlabStatus?.repoCount ?? 0,
-            error: String(err),
-          }
+          this.gitlabStatus = this.buildErrorStatus(this.gitlabStatus, err, 'gitlab')
+        }
+      } else {
+        this.gitlabStatus = {
+          ...base,
+          syncing: false,
+          error: base.error ?? 'Reconnect required',
+          errorKind: base.errorKind ?? 'unauthorized',
         }
       }
     } else {
@@ -137,6 +163,24 @@ export class RepoSyncer {
 
     this.pushRepos()
     this.pushStatus()
+  }
+
+  /** Preserves last-successful metadata and annotates the new failure. */
+  private buildErrorStatus(
+    previous: ProviderSyncStatus | null,
+    err: unknown,
+    provider: 'github' | 'gitlab',
+  ): ProviderSyncStatus {
+    const message = err instanceof ApiError ? err.message : String(err)
+    const errorKind = err instanceof ApiError ? err.kind : null
+    logger.error(`syncer.${provider}.failed`, { error: message, kind: errorKind })
+    return {
+      syncing: false,
+      lastSyncAt: previous?.lastSyncAt ?? null,
+      repoCount: previous?.repoCount ?? 0,
+      error: message,
+      errorKind,
+    }
   }
 
   /** Pushes the cached repos to the renderer. */
