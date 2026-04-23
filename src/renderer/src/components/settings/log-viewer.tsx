@@ -22,6 +22,26 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
 }
 
+/** Renders a single context value compactly (JSON for objects, bare for primitives). */
+function renderValue(value: unknown): string {
+  if (value === null) return 'null'
+  if (value === undefined) return ''
+  if (typeof value === 'string') return value.includes(' ') ? JSON.stringify(value) : value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
+}
+
+/** Flattens a context object to `key=value key=value` for inline display. */
+function formatContext(context: Record<string, unknown> | undefined): string {
+  if (!context) return ''
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(context)) {
+    if (value === undefined) continue
+    parts.push(`${key}=${renderValue(value)}`)
+  }
+  return parts.join(' ')
+}
+
 /** Modal dialog showing application logs from the main process. */
 export function LogViewer(): ReactNode {
   const [open, setOpen] = useState(false)
@@ -68,17 +88,23 @@ export function LogViewer(): ReactNode {
             <p className="py-8 text-center text-sm text-muted-foreground">No logs yet</p>
           ) : (
             <div className="space-y-0.5 font-mono text-xs">
-              {entries.map((entry, i) => (
-                <div key={i} className="flex gap-2 px-1 py-0.5">
-                  <span className="shrink-0 text-muted-foreground">
-                    {formatTime(entry.timestamp)}
-                  </span>
-                  <span className={`w-10 shrink-0 ${LEVEL_COLORS[entry.level]}`}>
-                    {entry.level}
-                  </span>
-                  <span className="min-w-0 break-all">{entry.message}</span>
-                </div>
-              ))}
+              {entries.map((entry, i) => {
+                const context = formatContext(entry.context)
+                return (
+                  <div key={i} className="flex gap-2 px-1 py-0.5">
+                    <span className="shrink-0 text-muted-foreground">
+                      {formatTime(entry.timestamp)}
+                    </span>
+                    <span className={`w-10 shrink-0 ${LEVEL_COLORS[entry.level]}`}>
+                      {entry.level}
+                    </span>
+                    <span className="min-w-0 break-all">
+                      <span>{entry.message}</span>
+                      {context && <span className="ml-2 text-muted-foreground">{context}</span>}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           )}
         </ScrollArea>
