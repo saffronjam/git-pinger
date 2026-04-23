@@ -125,6 +125,7 @@ async function executeOnce<T>(
       status: response.status,
       durationMs,
       kind,
+      bodyPreview,
     })
     throw new ApiError({
       kind,

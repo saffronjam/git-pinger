@@ -105,7 +105,21 @@ app.whenReady().then(() => {
   if (!existsSync(tokensDir)) mkdirSync(tokensDir, { recursive: true })
   const tokenStore = new TokenStore(join(tokensDir, 'tokens.enc'), safeStorage)
 
+  for (const provider of ['github', 'gitlab'] as const) {
+    const entry = tokenStore.getEntry(provider)
+    logger.info('token-store.boot', {
+      provider,
+      present: entry !== null,
+      kind: entry?.kind ?? null,
+      hasRefreshToken: entry?.kind === 'oauth' && entry.refreshToken !== null,
+      expiresAt: entry?.kind === 'oauth' ? entry.expiresAt : null,
+    })
+  }
+
   const gitlabClientId = import.meta.env.MAIN_VITE_GITLAB_CLIENT_ID as string | undefined
+  logger.info('auth-refresher.config', {
+    gitlabClientIdConfigured: gitlabClientId !== undefined && gitlabClientId.length > 0,
+  })
   const authRefresher = new AuthRefresher({
     configManager,
     tokenStore,
@@ -122,19 +136,48 @@ app.whenReady().then(() => {
   const poller = new Poller(configManager, tokenStore, authRefresher, showNotification)
   const repoSyncer = new RepoSyncer(configManager, tokenStore, authRefresher)
 
-  const mainWindow = createWindow()
-  logger.info('Main window created')
+  let currentMainWindow: BrowserWindow | null = null
 
-  configManager.setMainWindow(mainWindow)
-  poller.setMainWindow(mainWindow)
-  repoSyncer.setMainWindow(mainWindow)
+  function getMainWindow(): BrowserWindow | null {
+    return currentMainWindow && !currentMainWindow.isDestroyed() ? currentMainWindow : null
+  }
 
-  registerIpcHandlers(configManager, tokenStore, poller, repoSyncer, mainWindow)
+  function bootMainWindow(): BrowserWindow {
+    const win = createWindow()
+    currentMainWindow = win
+    logger.info('Main window created')
+    win.on('closed', () => {
+      if (currentMainWindow === win) {
+        currentMainWindow = null
+        logger.info('Main window closed')
+      }
+    })
+    configManager.setMainWindow(win)
+    poller.setMainWindow(win)
+    repoSyncer.setMainWindow(win)
+    return win
+  }
 
-  syncServicesToConfig(configManager, poller, repoSyncer)
+  bootMainWindow()
+
+  registerIpcHandlers(configManager, tokenStore, poller, repoSyncer, getMainWindow)
+
+  ;(async () => {
+    for (const provider of ['github', 'gitlab'] as const) {
+      try {
+        await authRefresher.refreshIfExpired(provider)
+      } catch (err) {
+        logger.error('auth.proactive-refresh.threw', { provider, error: String(err) })
+      }
+    }
+    syncServicesToConfig(configManager, poller, repoSyncer)
+  })()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      logger.info('App activated with no windows; re-creating main window')
+      bootMainWindow()
+    }
   })
 })
 

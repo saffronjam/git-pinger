@@ -21,9 +21,19 @@ export function registerIpcHandlers(
   tokenStore: TokenStore,
   poller: Poller,
   repoSyncer: RepoSyncer,
-  mainWindow: BrowserWindow,
+  getMainWindow: () => BrowserWindow | null,
 ): void {
   let oauthAbort: AbortController | null = null
+
+  /** Sends a push-channel message to the current main window if one is alive. */
+  function sendToRenderer(channel: string, payload: unknown): void {
+    const win = getMainWindow()
+    if (!win) {
+      logger.warn('ipc.push-dropped', { channel, reason: 'no-active-window' })
+      return
+    }
+    win.webContents.send(channel, payload)
+  }
 
   ipcMain.handle('auth:oauth-availability', () => {
     return {
@@ -42,7 +52,7 @@ export function registerIpcHandlers(
     oauthAbort = new AbortController()
     const { signal } = oauthAbort
 
-    mainWindow.webContents.send('oauth:progress', {
+    sendToRenderer('oauth:progress', {
       phase: 'requesting_code',
       userCode: null,
       verificationUri: null,
@@ -53,7 +63,7 @@ export function registerIpcHandlers(
       logger.info('GitHub OAuth: starting device flow')
       const flow = await githubClient.startDeviceFlow(clientId)
 
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'awaiting_user',
         userCode: flow.userCode,
         verificationUri: flow.verificationUri,
@@ -62,7 +72,7 @@ export function registerIpcHandlers(
 
       shell.openExternal(flow.verificationUri)
 
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'polling',
         userCode: flow.userCode,
         verificationUri: flow.verificationUri,
@@ -91,7 +101,7 @@ export function registerIpcHandlers(
       syncServicesToConfig(configManager, poller, repoSyncer)
       logger.info(`GitHub OAuth: connected as ${validation.username}`)
 
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'success',
         userCode: null,
         verificationUri: null,
@@ -100,7 +110,7 @@ export function registerIpcHandlers(
     } catch (err) {
       if (signal.aborted) return
       logger.error(`GitHub OAuth: ${String(err)}`)
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'error',
         userCode: null,
         verificationUri: null,
@@ -120,7 +130,7 @@ export function registerIpcHandlers(
     oauthAbort = new AbortController()
     const { signal } = oauthAbort
 
-    mainWindow.webContents.send('oauth:progress', {
+    sendToRenderer('oauth:progress', {
       phase: 'requesting_code',
       userCode: null,
       verificationUri: null,
@@ -131,7 +141,7 @@ export function registerIpcHandlers(
       logger.info('GitLab OAuth: starting device flow')
       const flow = await gitlabClient.startDeviceFlow(clientId)
 
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'awaiting_user',
         userCode: flow.userCode,
         verificationUri: flow.verificationUri,
@@ -140,7 +150,7 @@ export function registerIpcHandlers(
 
       shell.openExternal(flow.verificationUri)
 
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'polling',
         userCode: flow.userCode,
         verificationUri: flow.verificationUri,
@@ -163,6 +173,17 @@ export function registerIpcHandlers(
         throw new Error(validation.error ?? 'Token validation failed')
       }
 
+      logger.info('GitLab OAuth: device-flow token received', {
+        hasAccessToken: tokenResult.accessToken.length > 0,
+        hasRefreshToken: tokenResult.refreshToken !== null,
+        expiresAt: tokenResult.expiresAt,
+      })
+      if (tokenResult.refreshToken === null) {
+        logger.warn(
+          'GitLab OAuth: no refresh_token returned by device flow — silent refresh will not work, user will need to reconnect on every access-token expiry',
+        )
+      }
+
       tokenStore.saveOAuthToken('gitlab', {
         accessToken: tokenResult.accessToken,
         refreshToken: tokenResult.refreshToken,
@@ -180,7 +201,7 @@ export function registerIpcHandlers(
         hasRefreshToken: tokenResult.refreshToken !== null,
       })
 
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'success',
         userCode: null,
         verificationUri: null,
@@ -189,7 +210,7 @@ export function registerIpcHandlers(
     } catch (err) {
       if (signal.aborted) return
       logger.error(`GitLab OAuth: ${String(err)}`)
-      mainWindow.webContents.send('oauth:progress', {
+      sendToRenderer('oauth:progress', {
         phase: 'error',
         userCode: null,
         verificationUri: null,
@@ -366,19 +387,21 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle('window:minimize', () => {
-    mainWindow.minimize()
+    getMainWindow()?.minimize()
   })
 
   ipcMain.handle('window:maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize()
+    const win = getMainWindow()
+    if (!win) return
+    if (win.isMaximized()) {
+      win.unmaximize()
     } else {
-      mainWindow.maximize()
+      win.maximize()
     }
   })
 
   ipcMain.handle('window:close', () => {
-    mainWindow.close()
+    getMainWindow()?.close()
   })
 
   ipcMain.handle('logs:get', () => {
