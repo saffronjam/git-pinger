@@ -25,6 +25,8 @@ function blankStatus(): ProviderSyncStatus {
   }
 }
 
+export type SyncStatusListener = (status: SyncStatus) => void
+
 /** Background syncer that periodically fetches available repos from connected providers. */
 export class RepoSyncer {
   private timer: ReturnType<typeof setInterval> | null = null
@@ -32,6 +34,7 @@ export class RepoSyncer {
   private githubStatus: ProviderSyncStatus | null = null
   private gitlabStatus: ProviderSyncStatus | null = null
   private mainWindow: BrowserWindow | null = null
+  private statusListener: SyncStatusListener | null = null
 
   constructor(
     private configManager: SyncerConfigManager,
@@ -42,6 +45,11 @@ export class RepoSyncer {
   /** Sets the main window reference for pushing updates. */
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
+  }
+
+  /** Registers a listener that fires whenever sync status changes (e.g. for the tray). */
+  setStatusListener(listener: SyncStatusListener): void {
+    this.statusListener = listener
   }
 
   /** Starts the background sync timer. Performs an immediate sync first. */
@@ -190,10 +198,12 @@ export class RepoSyncer {
     }
   }
 
-  /** Pushes the current sync status to the renderer. */
+  /** Pushes the current sync status to the renderer and any registered status listener. */
   private pushStatus(): void {
+    const status = this.getStatus()
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('sync:status-changed', this.getStatus())
+      this.mainWindow.webContents.send('sync:status-changed', status)
     }
+    this.statusListener?.(status)
   }
 }

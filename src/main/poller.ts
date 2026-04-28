@@ -15,6 +15,8 @@ export type PollerConfigManager = Pick<ConfigManager, 'get'>
 export type PollerTokenStore = Pick<TokenStore, 'getToken'>
 export type PollerAuthRefresher = Pick<AuthRefresher, 'onUnauthorized'>
 
+export type PollerStatusListener = (status: PollerStatus) => void
+
 /** Periodically polls GitHub and GitLab APIs for new events. */
 export class Poller {
   private timer: ReturnType<typeof setInterval> | null = null
@@ -24,6 +26,7 @@ export class Poller {
   private projectStatuses = new Map<string, ProjectPollStatus>()
   private mainWindow: BrowserWindow | null = null
   private firstPollCompleted = false
+  private statusListener: PollerStatusListener | null = null
 
   constructor(
     private configManager: PollerConfigManager,
@@ -35,6 +38,11 @@ export class Poller {
   /** Sets the main window reference for pushing status updates. */
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
+  }
+
+  /** Registers a listener that fires whenever poller status changes (e.g. for the tray). */
+  setStatusListener(listener: PollerStatusListener): void {
+    this.statusListener = listener
   }
 
   /** Starts the polling timer at the configured interval. */
@@ -376,11 +384,13 @@ export class Poller {
     return now.toISOString()
   }
 
-  /** Pushes current poller status to the renderer. */
+  /** Pushes current poller status to the renderer and any registered status listener. */
   private pushStatus(): void {
+    const status = this.getStatus()
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send('poller:status-changed', this.getStatus())
+      this.mainWindow.webContents.send('poller:status-changed', status)
     }
+    this.statusListener?.(status)
   }
 
   /** Pushes new detected events to the renderer. */

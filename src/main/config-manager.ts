@@ -5,10 +5,13 @@ import { DEFAULT_CONFIG } from '../shared/config'
 import type { MonitoredProject, NotificationEventFlags } from '../shared/project'
 import type { GitHubConnection, GitLabConnection, Provider } from '../shared/provider'
 
+export type ConfigUpdateListener = () => void
+
 /** Manages application configuration with typed access and renderer sync. */
 export class ConfigManager {
   private conf: Conf<AppConfig>
   private mainWindow: BrowserWindow | null = null
+  private updateListener: ConfigUpdateListener | null = null
 
   constructor() {
     this.conf = new Conf<AppConfig>({
@@ -19,6 +22,11 @@ export class ConfigManager {
   /** Sets the main window reference for pushing config updates to the renderer. */
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
+  }
+
+  /** Registers a local listener fired whenever the config changes (e.g. for the tray). */
+  setUpdateListener(listener: ConfigUpdateListener): void {
+    this.updateListener = listener
   }
 
   /** Returns the full application config. */
@@ -127,10 +135,17 @@ export class ConfigManager {
     this.pushUpdate()
   }
 
-  /** Pushes the current config to the renderer via IPC. */
+  /** Sets the run-at-login preference. The actual login-item registration is applied by the caller. */
+  setRunAtLogin(value: boolean): void {
+    this.conf.set('startup', { ...this.conf.get('startup'), runAtLogin: value })
+    this.pushUpdate()
+  }
+
+  /** Pushes the current config to the renderer via IPC and any local listener. */
   private pushUpdate(): void {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send('config:updated', this.get())
     }
+    this.updateListener?.()
   }
 }
