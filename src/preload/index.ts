@@ -37,6 +37,8 @@ const api = {
       ipcRenderer.invoke('config:set-lookback-minutes', minutes),
     setTheme: (theme: AppConfig['theme']): Promise<void> =>
       ipcRenderer.invoke('config:set-theme', theme),
+    setRunAtLogin: (value: boolean): Promise<void> =>
+      ipcRenderer.invoke('config:set-run-at-login', value),
     setNotificationTemplates: (templates: NotificationTemplates): Promise<void> =>
       ipcRenderer.invoke('config:set-notification-templates', templates),
     reset: (): Promise<void> => ipcRenderer.invoke('config:reset'),

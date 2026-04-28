@@ -82,6 +82,7 @@ export interface IpcInvokeChannels {
   'config:set-polling-interval': [args: [seconds: number], result: void]
   'config:set-lookback-minutes': [args: [minutes: number], result: void]
   'config:set-theme': [args: [theme: AppConfig['theme']], result: void]
+  'config:set-run-at-login': [args: [value: boolean], result: void]
   'config:set-notification-templates': [args: [templates: NotificationTemplates], result: void]
   'config:reset': [args: [], result: void]
   'sync:get-repos': [args: [], result: AvailableProject[]]

@@ -18,9 +18,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useConfig } from '@/hooks/use-config'
 import { ConnectionCard } from './connection-card'
+import { PollerControlSetting } from './poller-control-setting'
 import { PollIntervalSetting } from './poll-interval-setting'
 import { LookbackSetting } from './lookback-setting'
 import { ThemeSetting } from './theme-setting'
+import { StartupSetting } from './startup-setting'
 import { NotificationTemplateSetting } from './notification-template-setting'
 import { LogViewer } from './log-viewer'
 import { DEFAULT_TEMPLATES } from '../../../../shared/config'
@@ -85,6 +87,7 @@ export function SettingsView({ onBack }: SettingsViewProps): ReactNode {
 
         <section className="space-y-4">
           <h3 className="text-sm font-medium text-muted-foreground">Polling</h3>
+          <PollerControlSetting />
           <PollIntervalSetting
             value={config?.polling.intervalSeconds ?? 60}
             onChange={handleIntervalChange}
@@ -101,6 +104,16 @@ export function SettingsView({ onBack }: SettingsViewProps): ReactNode {
           <h3 className="text-sm font-medium text-muted-foreground">Appearance</h3>
           <ThemeSetting />
         </section>
+
+        {window.api.window.platform === 'darwin' && (
+          <>
+            <Separator />
+            <section className="space-y-4">
+              <h3 className="text-sm font-medium text-muted-foreground">Startup</h3>
+              <StartupSetting runAtLogin={config?.startup.runAtLogin ?? false} />
+            </section>
+          </>
+        )}
 
         <Separator />
 

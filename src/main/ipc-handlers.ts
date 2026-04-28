@@ -1,4 +1,4 @@
-import { ipcMain, Notification, shell, type BrowserWindow } from 'electron'
+import { app, ipcMain, Notification, shell, type BrowserWindow } from 'electron'
 import type { Provider } from '../shared/provider'
 import type { MonitoredProject, NotificationEventFlags } from '../shared/project'
 import type { AppConfig, NotificationTemplates } from '../shared/config'
@@ -302,6 +302,14 @@ export function registerIpcHandlers(
   ipcMain.handle('config:set-theme', (_event, theme: AppConfig['theme']) => {
     logger.info(`Config: theme changed to ${theme}`)
     configManager.setTheme(theme)
+  })
+
+  ipcMain.handle('config:set-run-at-login', (_event, value: boolean) => {
+    logger.info('Config: runAtLogin changed', { value })
+    configManager.setRunAtLogin(value)
+    if (process.platform === 'darwin') {
+      app.setLoginItemSettings({ openAtLogin: value, openAsHidden: true })
+    }
   })
 
   ipcMain.handle(

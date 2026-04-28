@@ -27,6 +27,7 @@ interface GitPingerAPI {
     setPollingInterval(seconds: number): Promise<void>
     setLookbackMinutes(minutes: number): Promise<void>
     setTheme(theme: AppConfig['theme']): Promise<void>
+    setRunAtLogin(value: boolean): Promise<void>
     setNotificationTemplates(templates: NotificationTemplates): Promise<void>
     reset(): Promise<void>
   }
