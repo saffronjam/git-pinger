@@ -1,4 +1,4 @@
-.PHONY: deps lint format typecheck test prepare-for-commit dev package-mac package-linux
+.PHONY: deps lint format typecheck test prepare-for-commit dev package-mac package-linux icons
 
 deps:
 	bun install
@@ -26,3 +26,9 @@ package-mac: deps
 
 package-linux: deps
 	bun run build:linux
+
+icons:
+	@command -v rsvg-convert >/dev/null 2>&1 || { echo "rsvg-convert not found. Install with: brew install librsvg" >&2; exit 1; }
+	rsvg-convert -w 16 -h 16 -o resources/tray-iconTemplate.png resources/tray-iconTemplate.svg
+	rsvg-convert -w 32 -h 32 -o resources/tray-iconTemplate@2x.png resources/tray-iconTemplate.svg
+	@echo "Tray icons regenerated from resources/tray-iconTemplate.svg"
