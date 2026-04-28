@@ -36,6 +36,9 @@ export interface AppConfig {
   }
   notifications: NotificationTemplates
   theme: 'light' | 'dark' | 'system'
+  startup: {
+    runAtLogin: boolean
+  }
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -50,4 +53,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   notifications: DEFAULT_TEMPLATES,
   theme: 'system',
+  startup: {
+    runAtLogin: false,
+  },
 }

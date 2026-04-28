@@ -14,6 +14,7 @@ function makeConfig(partial?: Partial<AppConfig>): AppConfig {
     polling: { intervalSeconds: 60, lookbackMinutes: 0 },
     notifications: DEFAULT_TEMPLATES,
     theme: 'system',
+    startup: { runAtLogin: false },
     ...partial,
   }
 }
