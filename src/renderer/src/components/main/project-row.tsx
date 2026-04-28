@@ -1,5 +1,5 @@
 import { useCallback, useState, type MouseEvent, type ReactNode } from 'react'
-import { ChevronRight, ExternalLink, Loader2, Trash2 } from 'lucide-react'
+import { ChevronRight, ExternalLink, Loader2, Pause, Trash2 } from 'lucide-react'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
@@ -75,7 +75,27 @@ function timeAgo(iso: string): string {
 }
 
 /** Renders a colored status dot with tooltip based on poll history. */
-function PollStatusDot({ status }: { status: ProjectPollStatus | null }): ReactNode {
+function PollStatusDot({
+  status,
+  pollerRunning,
+}: {
+  status: ProjectPollStatus | null
+  pollerRunning: boolean
+}): ReactNode {
+  if (!pollerRunning) {
+    const lastPollLabel = status?.lastPollAt ? timeAgo(status.lastPollAt) : 'never'
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex size-3 shrink-0 items-center justify-center">
+            <Pause className="size-3 fill-muted-foreground text-muted-foreground" />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>Paused — last polled {lastPollLabel}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
   if (!status) {
     return (
       <Tooltip>
@@ -177,7 +197,7 @@ export function ProjectRow({ project, onUpdateEvents, onRemove }: ProjectRowProp
         className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-accent/50"
         onClick={handleRowClick}
       >
-        <PollStatusDot status={projectPollStatus} />
+        <PollStatusDot status={projectPollStatus} pollerRunning={pollerStatus?.running ?? false} />
         <ChevronRight
           className={`size-3 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
         />

@@ -1,5 +1,5 @@
 import { useCallback, type ReactNode } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, Pause, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -84,6 +84,11 @@ export function ProviderStatusPopover({
   const Icon = provider === 'github' ? GitHubIcon : GitLabIcon
   const isSyncing = providerSync?.syncing === true
   const dotColor = syncStatusColor(providerSync)
+  const showPaused =
+    pollerStatus !== null &&
+    !pollerStatus.running &&
+    !providerSync?.error &&
+    providerSync?.errorKind !== 'unauthorized'
 
   const handleSyncNow = useCallback(() => {
     window.api.sync.trigger()
@@ -97,6 +102,8 @@ export function ProviderStatusPopover({
           <div className="flex size-2.5 items-center justify-center">
             {isSyncing ? (
               <Loader2 className="size-2.5 animate-spin text-muted-foreground" />
+            ) : showPaused ? (
+              <Pause className="size-2.5 fill-muted-foreground text-muted-foreground" />
             ) : (
               <div className={`size-2 rounded-full ${dotColor}`} />
             )}
