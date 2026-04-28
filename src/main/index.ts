@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import trayIconPath from '../../resources/tray-iconTemplate.png?asset'
 import { ConfigManager } from './config-manager'
 import { TokenStore } from './token-store'
 import { Poller } from './poller'
@@ -12,7 +13,10 @@ import * as gitlabClient from './gitlab-client'
 import { showNotification } from './notification-manager'
 import { syncServicesToConfig } from './service-manager'
 import { registerIpcHandlers } from './ipc-handlers'
+import { TrayManager } from './tray-manager'
 import { logger } from './logger'
+
+let isQuitting = false
 
 /** Creates the main application window sized to 80% of the primary display. */
 function createWindow(): BrowserWindow {
@@ -88,6 +92,10 @@ function installLinuxDesktopEntry(): void {
   logger.info('Installed .desktop file and icon for Linux desktop integration')
 }
 
+app.on('before-quit', () => {
+  isQuitting = true
+})
+
 app.whenReady().then(() => {
   logger.info(`App starting (platform=${process.platform}, version=${app.getVersion()})`)
   electronApp.setAppUserModelId('com.saffronjam.git-pinger')
@@ -146,6 +154,13 @@ app.whenReady().then(() => {
     const win = createWindow()
     currentMainWindow = win
     logger.info('Main window created')
+    win.on('close', (event) => {
+      if (process.platform === 'darwin' && !isQuitting) {
+        event.preventDefault()
+        win.hide()
+        logger.info('Main window hidden (close intercepted on darwin)')
+      }
+    })
     win.on('closed', () => {
       if (currentMainWindow === win) {
         currentMainWindow = null
@@ -158,7 +173,55 @@ app.whenReady().then(() => {
     return win
   }
 
-  bootMainWindow()
+  function showOrCreateMainWindow(): void {
+    const win = getMainWindow() ?? bootMainWindow()
+    if (!win.isVisible()) win.show()
+    win.focus()
+  }
+
+  function applyLoginItemSetting(): void {
+    if (process.platform !== 'darwin') return
+    const { runAtLogin } = configManager.get().startup
+    app.setLoginItemSettings({ openAtLogin: runAtLogin, openAsHidden: true })
+    logger.info('login-item.applied', { runAtLogin })
+  }
+
+  const loginItemSettings = app.getLoginItemSettings()
+  const startHidden =
+    process.platform === 'darwin' &&
+    loginItemSettings.wasOpenedAtLogin === true &&
+    loginItemSettings.wasOpenedAsHidden === true
+
+  if (!startHidden) {
+    bootMainWindow()
+  } else {
+    logger.info('Main window suppressed (launched hidden by login item)')
+  }
+
+  applyLoginItemSetting()
+
+  let trayManager: TrayManager | null = null
+  if (process.platform === 'darwin') {
+    trayManager = new TrayManager({
+      configManager,
+      poller,
+      repoSyncer,
+      showWindow: showOrCreateMainWindow,
+      reconnect: () => showOrCreateMainWindow(),
+      applyLoginItemSetting,
+      quit: () => {
+        isQuitting = true
+        app.quit()
+      },
+      trayIconPath,
+    })
+    trayManager.init()
+
+    const refreshTray = (): void => trayManager?.refresh()
+    configManager.setUpdateListener(refreshTray)
+    poller.setStatusListener(refreshTray)
+    repoSyncer.setStatusListener(refreshTray)
+  }
 
   registerIpcHandlers(configManager, tokenStore, poller, repoSyncer, getMainWindow)
 
@@ -187,10 +250,8 @@ app.whenReady().then(() => {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      logger.info('App activated with no windows; re-creating main window')
-      bootMainWindow()
-    }
+    logger.info('App activated')
+    showOrCreateMainWindow()
   })
 })
 
