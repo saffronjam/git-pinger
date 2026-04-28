@@ -148,6 +148,73 @@ describe('AuthRefresher', () => {
     expect(savedOauth.length).toBe(1)
   })
 
+  test('concurrent refresh calls coalesce into a single refresher invocation (reuse-detection regression)', async () => {
+    let refresherCalls = 0
+    const { refresher, savedOauth } = buildDeps({
+      entry: {
+        kind: 'oauth',
+        accessToken: 'old',
+        refreshToken: 'r',
+        expiresAt: null,
+      },
+      refresher: async () => {
+        refresherCalls++
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return { accessToken: 'new', refreshToken: 'r2', expiresAt: null }
+      },
+    })
+    const [a, b, c] = await Promise.all([
+      refresher.refresh('gitlab'),
+      refresher.refresh('gitlab'),
+      refresher.refresh('gitlab'),
+    ])
+    expect(refresherCalls).toBe(1)
+    expect(a).toBe('new')
+    expect(b).toBe('new')
+    expect(c).toBe('new')
+    expect(savedOauth.length).toBe(1)
+  })
+
+  test('single-flight cache is released after a refresh settles', async () => {
+    let refresherCalls = 0
+    const { refresher } = buildDeps({
+      entry: {
+        kind: 'oauth',
+        accessToken: 'old',
+        refreshToken: 'r',
+        expiresAt: null,
+      },
+      refresher: async () => {
+        refresherCalls++
+        return { accessToken: `new-${refresherCalls}`, refreshToken: 'r2', expiresAt: null }
+      },
+    })
+    await refresher.refresh('gitlab')
+    await refresher.refresh('gitlab')
+    expect(refresherCalls).toBe(2)
+  })
+
+  test('concurrent refresh coalesces even when the refresher throws', async () => {
+    let refresherCalls = 0
+    const { refresher, setNeedsReauthCalls } = buildDeps({
+      entry: {
+        kind: 'oauth',
+        accessToken: 'old',
+        refreshToken: 'r',
+        expiresAt: null,
+      },
+      refresher: async () => {
+        refresherCalls++
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        throw new Error('invalid_grant')
+      },
+    })
+    const results = await Promise.all([refresher.refresh('gitlab'), refresher.refresh('gitlab')])
+    expect(refresherCalls).toBe(1)
+    expect(results).toEqual([null, null])
+    expect(setNeedsReauthCalls.filter((c) => c.value === true).length).toBe(1)
+  })
+
   test('marks needsReauth when refresher itself throws', async () => {
     const { refresher, setNeedsReauthCalls, savedOauth } = buildDeps({
       entry: {

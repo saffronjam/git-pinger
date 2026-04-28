@@ -1,4 +1,4 @@
-import { app, nativeTheme, safeStorage, shell, BrowserWindow } from 'electron'
+import { app, nativeTheme, powerMonitor, safeStorage, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -162,7 +162,7 @@ app.whenReady().then(() => {
 
   registerIpcHandlers(configManager, tokenStore, poller, repoSyncer, getMainWindow)
 
-  ;(async () => {
+  async function proactiveRefreshAllProviders(): Promise<void> {
     for (const provider of ['github', 'gitlab'] as const) {
       try {
         await authRefresher.refreshIfExpired(provider)
@@ -170,8 +170,21 @@ app.whenReady().then(() => {
         logger.error('auth.proactive-refresh.threw', { provider, error: String(err) })
       }
     }
+  }
+
+  ;(async () => {
+    await proactiveRefreshAllProviders()
     syncServicesToConfig(configManager, poller, repoSyncer)
   })()
+
+  powerMonitor.on('resume', () => {
+    logger.info('power.resume')
+    void proactiveRefreshAllProviders()
+  })
+  powerMonitor.on('unlock-screen', () => {
+    logger.info('power.unlock-screen')
+    void proactiveRefreshAllProviders()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -45,7 +45,9 @@ export function showNotification(event: DetectedEvent, config: AppConfig): void 
   const title = renderTemplate(template.titleTemplate, variables)
   const body = renderTemplate(template.bodyTemplate, variables)
 
-  const notification = new Notification({ title, body, icon: iconPath })
+  const notification = new Notification(
+    process.platform === 'darwin' ? { title, body } : { title, body, icon: iconPath },
+  )
 
   activeNotifications.add(notification)
 

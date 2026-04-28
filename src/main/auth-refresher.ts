@@ -23,8 +23,16 @@ const EXPIRY_GRACE_MS = 5 * 60 * 1000
  * Handles the HTTP-client's onUnauthorized callback. Attempts an OAuth refresh when a refresh token
  * is available; otherwise flips the connection's needsReauth flag so the UI can surface a
  * Reconnect CTA.
+ *
+ * Refresh is single-flighted per provider — concurrent callers share a single in-flight HTTP POST
+ * to the provider's token endpoint. This is load-bearing: GitLab's doorkeeper rotates refresh
+ * tokens and treats a second presentation of an already-rotated token as reuse (potential theft),
+ * revoking the entire token family. Two concurrent 401s hitting two concurrent refresh calls is
+ * enough to force the user to re-login.
  */
 export class AuthRefresher {
+  private inflight = new Map<Provider, Promise<string | null>>()
+
   constructor(private deps: AuthRefresherDeps) {}
 
   /** Creates a bound callback suitable for passing as http-client's onUnauthorized option. */
@@ -85,8 +93,24 @@ export class AuthRefresher {
     return result ? 'refreshed' : 'failed'
   }
 
-  /** Attempts to refresh the given provider's token. Returns the new access token or null. */
+  /**
+   * Attempts to refresh the given provider's token. Returns the new access token or null.
+   * Concurrent calls for the same provider are coalesced into a single refresher invocation.
+   */
   async refresh(provider: Provider): Promise<string | null> {
+    const existing = this.inflight.get(provider)
+    if (existing) {
+      logger.info('auth.refresh.coalesced', { provider })
+      return existing
+    }
+    const promise = this.doRefresh(provider).finally(() => {
+      this.inflight.delete(provider)
+    })
+    this.inflight.set(provider, promise)
+    return promise
+  }
+
+  private async doRefresh(provider: Provider): Promise<string | null> {
     const entry = this.deps.tokenStore.getEntry(provider)
     const refresher = this.deps.refreshers.getRefresher(provider)
     const entryKind = entry?.kind ?? 'missing'
