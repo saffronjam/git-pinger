@@ -3,7 +3,11 @@ import type { Provider } from '../shared/provider'
 import { AuthRefresher, type ProviderRefresher } from './auth-refresher'
 import type { StoredToken } from './token-store'
 
-function buildDeps(params: { entry: StoredToken | null; refresher: ProviderRefresher | null }): {
+function buildDeps(params: {
+  entry: StoredToken | null
+  refresher: ProviderRefresher | null
+  saveError?: Error
+}): {
   refresher: AuthRefresher
   setNeedsReauthCalls: Array<{ provider: Provider; value: boolean }>
   savedOauth: Array<{ provider: Provider; accessToken: string; refreshToken: string | null }>
@@ -20,12 +24,14 @@ function buildDeps(params: { entry: StoredToken | null; refresher: ProviderRefre
     },
     tokenStore: {
       getEntry: () => params.entry,
-      saveOAuthToken: (provider, entry) =>
+      saveOAuthToken: (provider, entry) => {
+        if (params.saveError) throw params.saveError
         savedOauth.push({
           provider,
           accessToken: entry.accessToken,
           refreshToken: entry.refreshToken,
-        }),
+        })
+      },
     },
     refreshers: {
       getRefresher: () => params.refresher,
@@ -213,6 +219,28 @@ describe('AuthRefresher', () => {
     expect(refresherCalls).toBe(1)
     expect(results).toEqual([null, null])
     expect(setNeedsReauthCalls.filter((c) => c.value === true).length).toBe(1)
+  })
+
+  test('persist failure returns access token but flips needsReauth (rotation already happened)', async () => {
+    const { refresher, setNeedsReauthCalls, savedOauth } = buildDeps({
+      entry: {
+        kind: 'oauth',
+        accessToken: 'old',
+        refreshToken: 'r-old',
+        expiresAt: null,
+      },
+      refresher: async () => ({
+        accessToken: 'new-access',
+        refreshToken: 'r-new',
+        expiresAt: null,
+      }),
+      saveError: new Error('disk full'),
+    })
+
+    const token = await refresher.refresh('gitlab')
+    expect(token).toBe('new-access')
+    expect(savedOauth.length).toBe(0)
+    expect(setNeedsReauthCalls).toEqual([{ provider: 'gitlab', value: true }])
   })
 
   test('marks needsReauth when refresher itself throws', async () => {
