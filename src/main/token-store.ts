@@ -1,4 +1,13 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import type { Provider } from '../shared/provider'
 
 export type StoredToken =
@@ -58,7 +67,7 @@ export class TokenStore {
 
   /** Encrypts and saves a raw string token (PAT-style) for the given provider. */
   saveToken(provider: Provider, token: string): void {
-    const data = this.load()
+    const data = { ...this.load() }
     data[provider] = { kind: 'raw', value: token }
     this.save(data)
   }
@@ -68,7 +77,7 @@ export class TokenStore {
     provider: Provider,
     entry: { accessToken: string; refreshToken: string | null; expiresAt: string | null },
   ): void {
-    const data = this.load()
+    const data = { ...this.load() }
     data[provider] = { kind: 'oauth', ...entry }
     this.save(data)
   }
@@ -94,7 +103,7 @@ export class TokenStore {
 
   /** Deletes the stored token for the given provider. */
   deleteToken(provider: Provider): void {
-    const data = this.load()
+    const data = { ...this.load() }
     data[provider] = null
     this.save(data)
   }
@@ -127,15 +136,43 @@ export class TokenStore {
     return this.cache
   }
 
-  /** Encrypts and writes the token data to disk. */
+  /**
+   * Encrypts and writes the token data to disk atomically.
+   *
+   * Writes to a sibling temp file, fsyncs it, then renames over the target. The in-memory cache is
+   * only updated after the rename succeeds, so a failure anywhere in the encrypt/write/rename
+   * sequence leaves both disk and cache untouched. This is load-bearing for OAuth refresh: if the
+   * cache were updated speculatively and the disk write later threw, the next process start would
+   * load the stale on-disk refresh token and be locked out by GitLab's rotation enforcement.
+   */
   private save(data: TokenData): void {
     if (!this.isAvailable()) {
       throw new Error('Encryption is not available on this system')
     }
 
-    this.cache = data
     const json = JSON.stringify(data)
     const encrypted = this.storage.encryptString(json)
-    writeFileSync(this.filePath, encrypted)
+    const tmpPath = `${this.filePath}.tmp`
+
+    const fd = openSync(tmpPath, 'w')
+    try {
+      writeFileSync(fd, encrypted)
+      fsyncSync(fd)
+    } catch (err) {
+      try {
+        closeSync(fd)
+      } catch {
+        // ignore — original error is more useful
+      }
+      try {
+        unlinkSync(tmpPath)
+      } catch {
+        // ignore — best-effort cleanup
+      }
+      throw err
+    }
+    closeSync(fd)
+    renameSync(tmpPath, this.filePath)
+    this.cache = data
   }
 }

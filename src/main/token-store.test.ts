@@ -86,4 +86,41 @@ describe('TokenStore', () => {
     store.saveToken('github', 'pat')
     expect(store.getRefreshToken('github')).toBeNull()
   })
+
+  test('save failure leaves disk and cache untouched (atomic-write invariant)', () => {
+    const store = new TokenStore(filePath, storage)
+    store.saveOAuthToken('gitlab', {
+      accessToken: 'a-old',
+      refreshToken: 'r-old',
+      expiresAt: null,
+    })
+
+    let throwOnce = true
+    const flakyStorage: SafeStorageLike = {
+      isEncryptionAvailable: () => true,
+      encryptString: (s: string) => {
+        if (throwOnce) {
+          throwOnce = false
+          throw new Error('keychain locked')
+        }
+        return Buffer.from(s, 'utf8')
+      },
+      decryptString: (b: Buffer) => b.toString('utf8'),
+    }
+    const flakyStore = new TokenStore(filePath, flakyStorage)
+
+    expect(() =>
+      flakyStore.saveOAuthToken('gitlab', {
+        accessToken: 'a-new',
+        refreshToken: 'r-new',
+        expiresAt: null,
+      }),
+    ).toThrow('keychain locked')
+
+    expect(flakyStore.getRefreshToken('gitlab')).toBe('r-old')
+
+    const reloaded = new TokenStore(filePath, storage)
+    expect(reloaded.getRefreshToken('gitlab')).toBe('r-old')
+    expect(reloaded.getToken('gitlab')).toBe('a-old')
+  })
 })
