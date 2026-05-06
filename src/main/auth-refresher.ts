@@ -119,23 +119,11 @@ export class AuthRefresher {
     const expiresAt = entry?.kind === 'oauth' ? entry.expiresAt : null
 
     if (entry?.kind === 'oauth' && entry.refreshToken && refresher) {
+      logger.info('auth.refresh.start', { provider, expiresAt })
+
+      let fresh: OAuthTokenResult
       try {
-        logger.info('auth.refresh.start', { provider, expiresAt })
-        const fresh = await refresher(entry.refreshToken)
-        this.deps.tokenStore.saveOAuthToken(provider, {
-          accessToken: fresh.accessToken,
-          refreshToken: fresh.refreshToken,
-          expiresAt: fresh.expiresAt,
-        })
-        this.deps.configManager.setNeedsReauth(provider, false)
-        logger.info('auth.refresh.success', {
-          provider,
-          newExpiresAt: fresh.expiresAt,
-          receivedNewRefreshToken: fresh.refreshToken !== null,
-          refreshTokenRotated:
-            fresh.refreshToken !== null && fresh.refreshToken !== entry.refreshToken,
-        })
-        return fresh.accessToken
+        fresh = await refresher(entry.refreshToken)
       } catch (err) {
         if (err instanceof ApiError) {
           logger.warn('auth.refresh.failed', {
@@ -151,6 +139,43 @@ export class AuthRefresher {
         this.deps.configManager.setNeedsReauth(provider, true)
         return null
       }
+
+      const rotated = fresh.refreshToken !== null && fresh.refreshToken !== entry.refreshToken
+      if (!rotated) {
+        logger.warn('auth.refresh.token-not-rotated', {
+          provider,
+          receivedNewRefreshToken: fresh.refreshToken !== null,
+        })
+      }
+
+      try {
+        this.deps.tokenStore.saveOAuthToken(provider, {
+          accessToken: fresh.accessToken,
+          refreshToken: fresh.refreshToken,
+          expiresAt: fresh.expiresAt,
+        })
+      } catch (err) {
+        // GitLab has already rotated entry.refreshToken on its side; the new token only exists in
+        // memory now. Surface it loudly and flip needsReauth so the user reconnects rather than
+        // hitting invalid_grant on the next process start. The current caller still gets the new
+        // access token so the in-flight request can complete.
+        logger.error('auth.refresh.persist-failed', {
+          provider,
+          error: String(err),
+          newExpiresAt: fresh.expiresAt,
+        })
+        this.deps.configManager.setNeedsReauth(provider, true)
+        return fresh.accessToken
+      }
+
+      this.deps.configManager.setNeedsReauth(provider, false)
+      logger.info('auth.refresh.success', {
+        provider,
+        newExpiresAt: fresh.expiresAt,
+        receivedNewRefreshToken: fresh.refreshToken !== null,
+        refreshTokenRotated: rotated,
+      })
+      return fresh.accessToken
     }
     logger.info('auth.refresh.unavailable', {
       provider,
