@@ -224,7 +224,14 @@ export async function pollForToken(
   })
 }
 
-/** Exchanges a refresh token for a new access token pair. */
+/**
+ * Exchanges a refresh token for a new access token pair.
+ *
+ * GitLab.com always rotates the refresh token on a successful refresh — the old one is invalidated
+ * the moment the new one is issued. We treat a 200 response without `refresh_token` as a hard
+ * failure rather than papering over it by re-persisting the (now-invalid) original. Doing
+ * otherwise locks the user out at the next refresh and is impossible to debug from logs.
+ */
 export async function refreshOAuthToken(
   clientId: string,
   refreshToken: string,
@@ -243,9 +250,14 @@ export async function refreshOAuthToken(
   if (!data.access_token) {
     throw new Error(data.error_description ?? data.error ?? 'Refresh failed: no access_token')
   }
+  if (!data.refresh_token) {
+    throw new Error(
+      'Refresh failed: GitLab response omitted refresh_token; original token is invalid post-rotation',
+    )
+  }
   return {
     accessToken: data.access_token,
-    refreshToken: data.refresh_token ?? refreshToken,
+    refreshToken: data.refresh_token,
     expiresAt: expiresAtFromSeconds(data.expires_in),
   }
 }

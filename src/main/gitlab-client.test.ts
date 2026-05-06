@@ -151,13 +151,17 @@ describe('gitlab-client', () => {
     expect(result.expiresAt).not.toBeNull()
   })
 
-  test('refreshOAuthToken falls back to the original refresh token when server omits it', async () => {
+  test('refreshOAuthToken throws when server omits refresh_token (rotation invariant)', async () => {
     mockRoute({
       urlPattern: /\/oauth\/token/,
       responses: [{ status: 200, body: { access_token: 'new-access', expires_in: 7200 } }],
     })
-    const result = await refreshOAuthToken('client', 'preserved-refresh')
-    expect(result.refreshToken).toBe('preserved-refresh')
+    try {
+      await refreshOAuthToken('client', 'preserved-refresh')
+      throw new Error('expected throw')
+    } catch (err) {
+      expect((err as Error).message).toContain('refresh_token')
+    }
   })
 
   test('refreshOAuthToken surfaces API failures', async () => {
