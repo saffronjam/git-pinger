@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
+  fetchMergeRequestNotes,
   fetchMergeRequests,
   fetchProjects,
   refreshOAuthToken,
@@ -175,5 +176,48 @@ describe('gitlab-client', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError)
     }
+  })
+
+  test('fetchMergeRequestNotes filters system notes and builds #note_id deep link', async () => {
+    const route = mockRoute({
+      urlPattern: /\/projects\/42\/merge_requests\/7\/notes/,
+      responses: [
+        {
+          status: 200,
+          body: [
+            {
+              id: 999,
+              body: 'lgtm',
+              author: { username: 'pierre' },
+              created_at: '2026-05-04T10:00:00Z',
+              updated_at: '2026-05-04T10:00:00Z',
+              system: false,
+            },
+            {
+              id: 1000,
+              body: 'marked as ready',
+              author: { username: 'pierre' },
+              created_at: '2026-05-04T10:01:00Z',
+              updated_at: '2026-05-04T10:01:00Z',
+              system: true,
+            },
+          ],
+        },
+      ],
+    })
+
+    const notes = await fetchMergeRequestNotes(
+      'tok',
+      'https://gitlab.com',
+      'oauth',
+      42,
+      7,
+      'https://gitlab.com/u/r/-/merge_requests/7',
+    )
+    expect(notes.length).toBe(1)
+    expect(notes[0]!.id).toBe('gitlab:note:999')
+    expect(notes[0]!.url).toBe('https://gitlab.com/u/r/-/merge_requests/7#note_999')
+    expect(route.calls[0]!.url).toContain('sort=desc')
+    expect(route.calls[0]!.url).toContain('order_by=created_at')
   })
 })

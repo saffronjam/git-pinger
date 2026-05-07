@@ -57,12 +57,30 @@ export interface OAuthTokenResult {
 
 export interface GitLabMRItem {
   id: string
+  iid: number
   title: string
   url: string
   author: string
   projectId: number
   timestamp: string
   scope: 'assigned_to_me' | 'reviews_for_me'
+}
+
+interface GitLabNote {
+  id: number
+  body: string
+  author: { username: string }
+  created_at: string
+  updated_at: string
+  system: boolean
+}
+
+export interface GitLabNoteItem {
+  id: string
+  url: string
+  author: string
+  createdAt: string
+  updatedAt: string
 }
 
 /** Normalizes the instance URL to remove trailing slashes. */
@@ -326,6 +344,7 @@ export async function fetchMergeRequests(
 
   return data.map((mr) => ({
     id: `gitlab:mr:${mr.id}`,
+    iid: mr.iid,
     title: mr.title,
     url: mr.web_url,
     author: mr.author.username,
@@ -333,4 +352,60 @@ export async function fetchMergeRequests(
     timestamp: mr.updated_at,
     scope,
   }))
+}
+
+/**
+ * Fetches non-system notes (comments) on an MR, sorted desc by created_at.
+ * GitLab's notes API does not support a `since` filter, so we fetch the most recent page
+ * and rely on the poller's seenEvents map for dedup.
+ *
+ * @param token bearer token (oauth) or PAT
+ * @param instanceUrl GitLab base URL (e.g. https://gitlab.com)
+ * @param authMethod 'oauth' | 'pat'
+ * @param projectId numeric GitLab project id (target_project_id of the MR)
+ * @param mrIid the project-scoped MR iid (the number you see in the URL)
+ * @param mrWebUrl the MR's web URL, used to build #note_id deep links
+ * @param onUnauthorized optional refresh hook for OAuth tokens
+ * @returns user-authored notes mapped to GitLabNoteItem
+ */
+export async function fetchMergeRequestNotes(
+  token: string,
+  instanceUrl: string,
+  authMethod: 'oauth' | 'pat',
+  projectId: number,
+  mrIid: number,
+  mrWebUrl: string,
+  onUnauthorized?: () => Promise<string | null>,
+): Promise<GitLabNoteItem[]> {
+  const base = normalizeUrl(instanceUrl)
+
+  const params = new URLSearchParams({
+    sort: 'desc',
+    order_by: 'created_at',
+    per_page: '100',
+  })
+
+  const data = await request<GitLabNote[]>(
+    `${base}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes?${params.toString()}`,
+    {
+      operation: 'gitlab.fetchMergeRequestNotes',
+      provider: 'gitlab',
+      headers: authHeaders(token, authMethod),
+      onUnauthorized,
+      rebuildHeaders: (newToken) => authHeaders(newToken, authMethod),
+    },
+  )
+
+  const items: GitLabNoteItem[] = []
+  for (const note of data) {
+    if (note.system) continue
+    items.push({
+      id: `gitlab:note:${note.id}`,
+      url: `${mrWebUrl}#note_${note.id}`,
+      author: note.author.username,
+      createdAt: note.created_at,
+      updatedAt: note.updated_at,
+    })
+  }
+  return items
 }

@@ -4,6 +4,7 @@ export interface NotificationEventFlags {
   prCreated: boolean
   prAssigned: boolean
   prReviewRequested: boolean
+  prComment: boolean
 }
 
 export interface MonitoredProject {

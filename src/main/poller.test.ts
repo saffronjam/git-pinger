@@ -47,7 +47,7 @@ const gitlabProject: MonitoredProject = {
   fullName: 'org/edge',
   name: 'edge',
   webUrl: 'https://gitlab.com/org/edge',
-  events: { prCreated: false, prAssigned: true, prReviewRequested: true },
+  events: { prCreated: false, prAssigned: true, prReviewRequested: true, prComment: false },
 }
 
 function gitlabConfig(): AppConfig {
@@ -69,6 +69,24 @@ function mrPayload(overrides?: Partial<{ updated_at: string }>): Record<string, 
   }
 }
 
+interface NoteOverrides {
+  id?: number
+  author?: string
+  system?: boolean
+  updated_at?: string
+}
+
+function notePayload(overrides?: NoteOverrides): Record<string, unknown> {
+  return {
+    id: overrides?.id ?? 9001,
+    body: 'great patch',
+    author: { username: overrides?.author ?? 'pierre_lefevre' },
+    created_at: '2026-04-22T08:00:00Z',
+    updated_at: overrides?.updated_at ?? '2026-04-22T08:00:00Z',
+    system: overrides?.system ?? false,
+  }
+}
+
 function queueGitLabAssigned(bodies: object[]): void {
   mockRoute({
     urlPattern: /scope=assigned_to_me/,
@@ -79,6 +97,13 @@ function queueGitLabAssigned(bodies: object[]): void {
 function queueGitLabReviews(bodies: object[]): void {
   mockRoute({
     urlPattern: /scope=reviews_for_me/,
+    responses: bodies.map((body) => ({ status: 200, body })),
+  })
+}
+
+function queueGitLabNotes(bodies: object[]): void {
+  mockRoute({
+    urlPattern: /\/merge_requests\/\d+\/notes/,
     responses: bodies.map((body) => ({ status: 200, body })),
   })
 }
@@ -189,5 +214,122 @@ describe('Poller notification dedup', () => {
 
     expect(notified.length).toBe(1)
     expect(notified[0]!.type).toBe('pr_assigned')
+  })
+})
+
+function gitlabConfigWithComments(): AppConfig {
+  return makeConfig({
+    connections: { github: null, gitlab: gitlabConnection },
+    monitoredProjects: [
+      {
+        ...gitlabProject,
+        events: { prCreated: false, prAssigned: true, prReviewRequested: true, prComment: true },
+      },
+    ],
+  })
+}
+
+describe('Poller pr_comment events', () => {
+  beforeEach(() => installFetchMock())
+  afterEach(() => resetFetchMock())
+
+  test('first poll seeds comment ids silently', async () => {
+    const configRef = { current: gitlabConfigWithComments() }
+    const tokenRef = { current: 'tok' as string | null }
+    const notified: DetectedEvent[] = []
+    const poller = makePoller(configRef, tokenRef, notified)
+
+    queueGitLabAssigned([[mrPayload()]])
+    queueGitLabReviews([[]])
+    queueGitLabNotes([[notePayload()]])
+
+    await poller.trigger()
+    expect(notified).toEqual([])
+  })
+
+  test('new comment from another user fires once', async () => {
+    const configRef = { current: gitlabConfigWithComments() }
+    const tokenRef = { current: 'tok' as string | null }
+    const notified: DetectedEvent[] = []
+    const poller = makePoller(configRef, tokenRef, notified)
+
+    queueGitLabAssigned([[mrPayload()], [mrPayload()]])
+    queueGitLabReviews([[], []])
+    queueGitLabNotes([[], [notePayload({ id: 9002 })]])
+
+    await poller.trigger()
+    await poller.trigger()
+
+    expect(notified.length).toBe(1)
+    expect(notified[0]!.type).toBe('pr_comment')
+    expect(notified[0]!.author).toBe('pierre_lefevre')
+    expect(notified[0]!.url).toContain('#note_9002')
+  })
+
+  test('comment authored by the user is ignored', async () => {
+    const configRef = { current: gitlabConfigWithComments() }
+    const tokenRef = { current: 'tok' as string | null }
+    const notified: DetectedEvent[] = []
+    const poller = makePoller(configRef, tokenRef, notified)
+
+    queueGitLabAssigned([[mrPayload()], [mrPayload()]])
+    queueGitLabReviews([[], []])
+    queueGitLabNotes([[], [notePayload({ id: 9003, author: 'saffronjam' })]])
+
+    await poller.trigger()
+    await poller.trigger()
+
+    expect(notified).toEqual([])
+  })
+
+  test('edits to an existing comment do not re-fire', async () => {
+    const configRef = { current: gitlabConfigWithComments() }
+    const tokenRef = { current: 'tok' as string | null }
+    const notified: DetectedEvent[] = []
+    const poller = makePoller(configRef, tokenRef, notified)
+
+    queueGitLabAssigned([[mrPayload()], [mrPayload()], [mrPayload()]])
+    queueGitLabReviews([[], [], []])
+    queueGitLabNotes([
+      [],
+      [notePayload({ id: 9004 })],
+      [notePayload({ id: 9004, updated_at: '2026-04-22T12:00:00Z' })],
+    ])
+
+    await poller.trigger()
+    await poller.trigger()
+    await poller.trigger()
+
+    expect(notified.length).toBe(1)
+  })
+
+  test('system notes are filtered out', async () => {
+    const configRef = { current: gitlabConfigWithComments() }
+    const tokenRef = { current: 'tok' as string | null }
+    const notified: DetectedEvent[] = []
+    const poller = makePoller(configRef, tokenRef, notified)
+
+    queueGitLabAssigned([[mrPayload()], [mrPayload()]])
+    queueGitLabReviews([[], []])
+    queueGitLabNotes([[], [notePayload({ id: 9005, system: true })]])
+
+    await poller.trigger()
+    await poller.trigger()
+
+    expect(notified).toEqual([])
+  })
+
+  test('does not fetch notes when prComment flag is off', async () => {
+    const configRef = { current: gitlabConfig() }
+    const tokenRef = { current: 'tok' as string | null }
+    const notified: DetectedEvent[] = []
+    const poller = makePoller(configRef, tokenRef, notified)
+
+    queueGitLabAssigned([[mrPayload()]])
+    queueGitLabReviews([[]])
+
+    await poller.trigger()
+
+    expect(notified).toEqual([])
   })
 })

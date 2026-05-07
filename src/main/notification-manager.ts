@@ -10,6 +10,7 @@ const EVENT_LABELS: Record<string, string> = {
   pr_created: 'New PR',
   pr_assigned: 'PR Assigned',
   pr_review_requested: 'Review Requested',
+  pr_comment: 'PR Comment',
 }
 
 /** Replaces {{key}} placeholders in a template string with values. */

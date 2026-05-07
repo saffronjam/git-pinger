@@ -22,6 +22,10 @@ export const DEFAULT_TEMPLATES: NotificationTemplates = {
     titleTemplate: 'Review requested - {{title}}',
     bodyTemplate: '{{author}} requested your review for "{{title}}" in {{project}} ({{provider}})',
   },
+  pr_comment: {
+    titleTemplate: 'New comment - {{title}}',
+    bodyTemplate: '{{author}} commented on "{{title}}" in {{project}} ({{provider}})',
+  },
 }
 
 export interface AppConfig {

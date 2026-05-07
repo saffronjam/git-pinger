@@ -1,6 +1,10 @@
 import type { Provider } from './provider'
 
-export type NotificationEventType = 'pr_created' | 'pr_assigned' | 'pr_review_requested'
+export type NotificationEventType =
+  | 'pr_created'
+  | 'pr_assigned'
+  | 'pr_review_requested'
+  | 'pr_comment'
 
 export interface DetectedEvent {
   id: string

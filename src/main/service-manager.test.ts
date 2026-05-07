@@ -54,7 +54,7 @@ describe('syncServicesToConfig', () => {
           fullName: 'u/r',
           name: 'r',
           webUrl: 'https://gh',
-          events: { prCreated: true, prAssigned: true, prReviewRequested: true },
+          events: { prCreated: true, prAssigned: true, prReviewRequested: true, prComment: true },
         },
       ],
     })

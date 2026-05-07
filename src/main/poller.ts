@@ -143,14 +143,15 @@ export class Poller {
 
     const unseenEvents = newEvents.filter((e) => !this.seenEvents.has(e.id))
 
+    const seenAt = new Date().toISOString()
     if (!this.firstPollCompleted) {
       for (const event of unseenEvents) {
-        this.seenEvents.set(event.id, event.timestamp)
+        this.seenEvents.set(event.id, seenAt)
       }
       logger.info('poll.first-poll-silent-init', { seededCount: unseenEvents.length })
     } else {
       for (const event of unseenEvents) {
-        this.seenEvents.set(event.id, event.timestamp)
+        this.seenEvents.set(event.id, seenAt)
         this.showNotification(event, config)
       }
       logger.info('poll.complete', {
@@ -168,14 +169,18 @@ export class Poller {
   }
 
   /**
-   * Prunes only :created events older than 24h. :assigned / :review entries are managed by the
-   * "not in current response → delete" logic above and must not be expired by timestamp — their
-   * stored timestamp is `mr.updated_at`, which doesn't reflect when we saw them.
+   * Prunes :created and :comment seen entries last observed more than 24h ago.
+   * :assigned / :review entries are managed by the "not in current response → delete"
+   * logic in poll() and must not be aged out here.
+   *
+   * The stored value is the seen-at time, not the event's own timestamp — this lets us
+   * forget stale dedup state for events whose own timestamps are arbitrarily old (e.g.
+   * a GitLab comment posted weeks ago that we just observed for the first time).
    */
   private pruneSeenEvents(): void {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-    for (const [id, timestamp] of this.seenEvents) {
-      if (id.includes(':created:') && timestamp < cutoff) {
+    for (const [id, seenAt] of this.seenEvents) {
+      if ((id.includes(':created:') || id.includes(':comment:')) && seenAt < cutoff) {
         this.seenEvents.delete(id)
       }
     }
@@ -245,6 +250,27 @@ export class Poller {
               timestamp: pr.createdAt,
             })
           }
+
+          const isInvolved = pr.assignees.includes(username) || pr.reviewers.includes(username)
+          if (flags.prComment && isInvolved) {
+            const [issueComments, reviewComments] = await Promise.all([
+              githubClient.fetchIssueComments(token, project.fullName, pr.number, since),
+              githubClient.fetchReviewComments(token, project.fullName, pr.number, since),
+            ])
+            for (const comment of [...issueComments, ...reviewComments]) {
+              if (comment.author === username) continue
+              events.push({
+                id: `${pr.id}:comment:${comment.id}`,
+                provider: 'github',
+                projectFullName: project.fullName,
+                type: 'pr_comment',
+                title: pr.title,
+                url: comment.url,
+                author: comment.author,
+                timestamp: comment.updatedAt,
+              })
+            }
+          }
         }
 
         this.recordProjectResult(project.id, true)
@@ -267,7 +293,7 @@ export class Poller {
     const token = this.tokenStore.getToken('gitlab')
     if (!token || !config.connections.gitlab) return []
 
-    const { instanceUrl, authMethod } = config.connections.gitlab
+    const { instanceUrl, authMethod, username } = config.connections.gitlab
     const monitoredGitlab = config.monitoredProjects.filter((p) => p.provider === 'gitlab')
     if (monitoredGitlab.length === 0) return []
 
@@ -335,6 +361,41 @@ export class Poller {
           timestamp: mr.timestamp,
         })
       }
+
+      const involvedMrs = new Map<string, (typeof assignedMRs)[number]>()
+      for (const mr of [...assignedMRs, ...reviewMRs]) {
+        const projectId = `gitlab:${mr.projectId}`
+        if (!monitoredIds.has(projectId)) continue
+        if (!eventsMap.get(projectId)?.prComment) continue
+        involvedMrs.set(mr.id, mr)
+      }
+
+      for (const mr of involvedMrs.values()) {
+        const projectId = `gitlab:${mr.projectId}`
+        const notes = await gitlabClient.fetchMergeRequestNotes(
+          token,
+          instanceUrl,
+          authMethod,
+          mr.projectId,
+          mr.iid,
+          mr.url,
+          onUnauthorized,
+        )
+        for (const note of notes) {
+          if (note.author === username) continue
+          events.push({
+            id: `${mr.id}:comment:${note.id}`,
+            provider: 'gitlab',
+            projectFullName: namesMap.get(projectId) ?? projectId,
+            type: 'pr_comment',
+            title: mr.title,
+            url: note.url,
+            author: note.author,
+            timestamp: note.updatedAt,
+          })
+        }
+      }
+
       for (const project of monitoredGitlab) {
         this.recordProjectResult(project.id, true)
       }

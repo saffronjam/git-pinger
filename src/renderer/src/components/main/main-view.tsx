@@ -69,7 +69,7 @@ export function MainView({ onOpenSettings }: MainViewProps): ReactNode {
       if (exists) return
       const added: MonitoredProject = {
         ...project,
-        events: { prCreated: true, prAssigned: true, prReviewRequested: true },
+        events: { prCreated: true, prAssigned: true, prReviewRequested: true, prComment: true },
       }
       const updated = [...monitored, added]
       setMonitored(updated)

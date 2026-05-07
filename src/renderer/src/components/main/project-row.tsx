@@ -31,12 +31,14 @@ const ALL_ON: NotificationEventFlags = {
   prCreated: true,
   prAssigned: true,
   prReviewRequested: true,
+  prComment: true,
 }
 
 const ALL_OFF: NotificationEventFlags = {
   prCreated: false,
   prAssigned: false,
   prReviewRequested: false,
+  prComment: false,
 }
 
 /** Returns the active event keys from a flags object. */

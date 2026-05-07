@@ -42,6 +42,14 @@ interface GitHubPullRequest {
   assignees: { login: string }[]
 }
 
+interface GitHubComment {
+  id: number
+  user: { login: string } | null
+  html_url: string
+  created_at: string
+  updated_at: string
+}
+
 export interface DeviceFlowResult {
   deviceCode: string
   userCode: string
@@ -59,6 +67,14 @@ export interface GitHubPRItem {
   author: string
   assignees: string[]
   reviewers: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GitHubCommentItem {
+  id: string
+  url: string
+  author: string
   createdAt: string
   updatedAt: string
 }
@@ -231,4 +247,73 @@ export async function fetchPullRequests(
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
   }))
+}
+
+function mapComments(raw: GitHubComment[]): GitHubCommentItem[] {
+  const items: GitHubCommentItem[] = []
+  for (const c of raw) {
+    if (!c.user) continue
+    items.push({
+      id: `github:comment:${c.id}`,
+      url: c.html_url,
+      author: c.user.login,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    })
+  }
+  return items
+}
+
+/**
+ * Fetches conversation (issue-style) comments on a PR, optionally filtered by an updated-at `since` timestamp.
+ * @param token GitHub access token
+ * @param repoFullName e.g. "owner/repo"
+ * @param prNumber PR number (the same value used in the PR URL)
+ * @param since ISO timestamp; if set, only comments with updated_at > since are returned
+ * @returns mapped comment items with stable ids
+ */
+export async function fetchIssueComments(
+  token: string,
+  repoFullName: string,
+  prNumber: number,
+  since: string | null,
+): Promise<GitHubCommentItem[]> {
+  const params = new URLSearchParams({ per_page: '100' })
+  if (since) params.set('since', since)
+  const data = await request<GitHubComment[]>(
+    `${API_BASE}/repos/${repoFullName}/issues/${prNumber}/comments?${params.toString()}`,
+    {
+      operation: 'github.fetchIssueComments',
+      provider: 'github',
+      headers: githubHeaders(token),
+    },
+  )
+  return mapComments(data)
+}
+
+/**
+ * Fetches inline review comments on a PR, optionally filtered by an updated-at `since` timestamp.
+ * @param token GitHub access token
+ * @param repoFullName e.g. "owner/repo"
+ * @param prNumber PR number
+ * @param since ISO timestamp; if set, only comments with updated_at > since are returned
+ * @returns mapped comment items with stable ids
+ */
+export async function fetchReviewComments(
+  token: string,
+  repoFullName: string,
+  prNumber: number,
+  since: string | null,
+): Promise<GitHubCommentItem[]> {
+  const params = new URLSearchParams({ per_page: '100' })
+  if (since) params.set('since', since)
+  const data = await request<GitHubComment[]>(
+    `${API_BASE}/repos/${repoFullName}/pulls/${prNumber}/comments?${params.toString()}`,
+    {
+      operation: 'github.fetchReviewComments',
+      provider: 'github',
+      headers: githubHeaders(token),
+    },
+  )
+  return mapComments(data)
 }

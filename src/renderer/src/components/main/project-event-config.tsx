@@ -12,6 +12,7 @@ const EVENT_LABELS: { key: keyof NotificationEventFlags; label: string }[] = [
   { key: 'prCreated', label: 'PR created' },
   { key: 'prAssigned', label: 'Assigned to me' },
   { key: 'prReviewRequested', label: 'Review requested' },
+  { key: 'prComment', label: 'PR comment' },
 ]
 
 /** Per-project notification event toggle configuration. */
@@ -28,7 +29,7 @@ export function ProjectEventConfig({ events, onUpdate }: ProjectEventConfigProps
       {EVENT_LABELS.map(({ key, label }) => (
         <div key={key} className="flex items-center gap-3">
           <Label className="w-32 text-xs font-normal text-muted-foreground">{label}</Label>
-          <Switch checked={events[key]} onCheckedChange={() => toggle(key)} />
+          <Switch checked={events[key] ?? false} onCheckedChange={() => toggle(key)} />
         </div>
       ))}
     </div>
@@ -40,4 +41,5 @@ export const EVENT_CHIP_LABELS: Record<keyof NotificationEventFlags, string> = {
   prCreated: 'PR created',
   prAssigned: 'Assigned',
   prReviewRequested: 'Review',
+  prComment: 'Comment',
 }
