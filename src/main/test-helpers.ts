@@ -10,6 +10,7 @@ interface StubResponse {
   status: number
   body: string | object
   headers?: Record<string, string>
+  waitFor?: Promise<void>
 }
 
 interface QueuedRoute {
@@ -47,6 +48,7 @@ export function installFetchMock(): void {
         if (!stub) {
           throw new Error(`Fetch mock: route matched but response queue exhausted for ${url}`)
         }
+        await stub.waitFor
         return buildResponse(stub)
       }
     }

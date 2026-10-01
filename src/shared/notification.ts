@@ -13,6 +13,7 @@ export interface DetectedEvent {
   type: NotificationEventType
   title: string
   url: string
+  /** Actor responsible for this event, or "Someone" when assignment attribution is unavailable. */
   author: string
   timestamp: string
 }

@@ -212,3 +212,23 @@ export async function paginate<T>(
   }
   return all
 }
+
+/**
+ * Reads a complete collection without silently truncating membership or activity history.
+ * @param buildUrl Builds the URL for each one-based page.
+ * @param opts Shared request options, including authentication refresh hooks.
+ * @param perPage Requested page size.
+ * @returns All items, or a rejection if any page fails.
+ */
+export async function paginateAll<T>(
+  buildUrl: (page: number) => string,
+  opts: Omit<RequestOptions, 'method' | 'body'>,
+  perPage = 100,
+): Promise<T[]> {
+  const result: T[] = []
+  for (let page = 1; ; page++) {
+    const items = await request<T[]>(buildUrl(page), opts)
+    result.push(...items)
+    if (items.length < perPage) return result
+  }
+}

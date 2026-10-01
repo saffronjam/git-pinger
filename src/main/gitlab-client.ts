@@ -1,10 +1,14 @@
 import type { AvailableProject } from '../shared/project'
 import type { ValidateTokenResult } from '../shared/ipc'
-import { ApiError, paginate, request } from './http-client'
+import { ApiError, paginate, paginateAll, request } from './http-client'
+import { parseGitLabActivity } from './gitlab-activity'
+import type { GitLabActivityNote } from './gitlab-activity'
+import type { ActivityUser, AssignmentActivity } from './notification-reconciler'
 
 const GITLAB_COM = 'https://gitlab.com'
 
 interface GitLabUser {
+  id?: number
   username: string
 }
 
@@ -69,7 +73,7 @@ export interface GitLabMRItem {
 interface GitLabNote {
   id: number
   body: string
-  author: { username: string }
+  author: GitLabUser | null
   created_at: string
   updated_at: string
   system: boolean
@@ -79,8 +83,73 @@ export interface GitLabNoteItem {
   id: string
   url: string
   author: string
+  authorId?: number
   createdAt: string
   updatedAt: string
+}
+
+export interface GitLabNotes {
+  comments: GitLabNoteItem[]
+  activities: AssignmentActivity[]
+}
+
+interface GitLabReviewer {
+  user: GitLabUser
+  state: string
+}
+
+/**
+ * Resolves the immutable identity of the authenticated GitLab account.
+ * @param token OAuth access token or PAT.
+ * @param instanceUrl GitLab instance URL.
+ * @param authMethod Authentication header type.
+ * @param onUnauthorized Optional token refresh callback.
+ * @returns Account ID and current username.
+ */
+export async function fetchCurrentUser(
+  token: string,
+  instanceUrl: string,
+  authMethod: 'oauth' | 'pat',
+  onUnauthorized?: () => Promise<string | null>,
+): Promise<ActivityUser> {
+  return request<GitLabUser>(`${normalizeUrl(instanceUrl)}/api/v4/user`, {
+    operation: 'gitlab.fetchCurrentUser',
+    provider: 'gitlab',
+    headers: authHeaders(token, authMethod),
+    onUnauthorized,
+    rebuildHeaders: (newToken) => authHeaders(newToken, authMethod),
+  })
+}
+
+/**
+ * Reads current review states, including users added by submitting their own review.
+ * @param token OAuth access token or PAT.
+ * @param instanceUrl GitLab instance URL.
+ * @param authMethod Authentication header type.
+ * @param projectId Target project ID.
+ * @param mrIid Project-scoped merge request number.
+ * @param onUnauthorized Optional token refresh callback.
+ * @returns Complete reviewer identities and provider review states.
+ */
+export async function fetchMergeRequestReviewers(
+  token: string,
+  instanceUrl: string,
+  authMethod: 'oauth' | 'pat',
+  projectId: number,
+  mrIid: number,
+  onUnauthorized?: () => Promise<string | null>,
+): Promise<GitLabReviewer[]> {
+  return paginateAll<GitLabReviewer>(
+    (page) =>
+      `${normalizeUrl(instanceUrl)}/api/v4/projects/${projectId}/merge_requests/${mrIid}/reviewers?per_page=100&page=${page}`,
+    {
+      operation: 'gitlab.fetchMergeRequestReviewers',
+      provider: 'gitlab',
+      headers: authHeaders(token, authMethod),
+      onUnauthorized,
+      rebuildHeaders: (newToken) => authHeaders(newToken, authMethod),
+    },
+  )
 }
 
 /** Normalizes the instance URL to remove trailing slashes. */
@@ -313,7 +382,16 @@ export async function fetchProjects(
   }))
 }
 
-/** Fetches merge requests for a given scope (assigned or review). */
+/**
+ * Fetches complete merge request membership for an assignment scope.
+ * @param token OAuth access token or PAT.
+ * @param instanceUrl GitLab instance URL.
+ * @param authMethod Authentication header type.
+ * @param scope Assignment or reviewer membership for the authenticated user.
+ * @param since Optional updated-at cutoff; assignment polling leaves this unset.
+ * @param onUnauthorized Optional token refresh callback.
+ * @returns All matching open merge requests, or a rejection if any page fails.
+ */
 export async function fetchMergeRequests(
   token: string,
   instanceUrl: string,
@@ -331,8 +409,8 @@ export async function fetchMergeRequests(
   })
   if (since) params.set('updated_after', since)
 
-  const data = await request<GitLabMergeRequest[]>(
-    `${base}/api/v4/merge_requests?${params.toString()}`,
+  const data = await paginateAll<GitLabMergeRequest>(
+    (page) => `${base}/api/v4/merge_requests?${params.toString()}&page=${page}`,
     {
       operation: `gitlab.fetchMergeRequests.${scope}`,
       provider: 'gitlab',
@@ -355,9 +433,7 @@ export async function fetchMergeRequests(
 }
 
 /**
- * Fetches non-system notes (comments) on an MR, sorted desc by created_at.
- * GitLab's notes API does not support a `since` filter, so we fetch the most recent page
- * and rely on the poller's seenEvents map for dedup.
+ * Fetches non-system comments using the shared, paginated notes reader.
  *
  * @param token bearer token (oauth) or PAT
  * @param instanceUrl GitLab base URL (e.g. https://gitlab.com)
@@ -377,6 +453,39 @@ export async function fetchMergeRequestNotes(
   mrWebUrl: string,
   onUnauthorized?: () => Promise<string | null>,
 ): Promise<GitLabNoteItem[]> {
+  return (
+    await fetchMergeRequestActivity(
+      token,
+      instanceUrl,
+      authMethod,
+      projectId,
+      mrIid,
+      mrWebUrl,
+      onUnauthorized,
+    )
+  ).comments
+}
+
+/**
+ * Reads comments and assignment evidence in a single complete notes scan.
+ * @param token OAuth access token or PAT.
+ * @param instanceUrl GitLab instance URL.
+ * @param authMethod Authentication header type.
+ * @param projectId Target project ID.
+ * @param mrIid Project-scoped merge request number.
+ * @param mrWebUrl Merge request URL for comment deep links.
+ * @param onUnauthorized Optional token refresh callback.
+ * @returns Comments and recognized system activity; rejects on any failed page.
+ */
+export async function fetchMergeRequestActivity(
+  token: string,
+  instanceUrl: string,
+  authMethod: 'oauth' | 'pat',
+  projectId: number,
+  mrIid: number,
+  mrWebUrl: string,
+  onUnauthorized?: () => Promise<string | null>,
+): Promise<GitLabNotes> {
   const base = normalizeUrl(instanceUrl)
 
   const params = new URLSearchParams({
@@ -385,8 +494,9 @@ export async function fetchMergeRequestNotes(
     per_page: '100',
   })
 
-  const data = await request<GitLabNote[]>(
-    `${base}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes?${params.toString()}`,
+  const data = await paginateAll<GitLabNote>(
+    (page) =>
+      `${base}/api/v4/projects/${projectId}/merge_requests/${mrIid}/notes?${params.toString()}&page=${page}`,
     {
       operation: 'gitlab.fetchMergeRequestNotes',
       provider: 'gitlab',
@@ -397,15 +507,25 @@ export async function fetchMergeRequestNotes(
   )
 
   const items: GitLabNoteItem[] = []
+  const activities: AssignmentActivity[] = []
   for (const note of data) {
-    if (note.system) continue
+    const activityNote: GitLabActivityNote = {
+      id: `gitlab:note:${note.id}`,
+      body: note.body,
+      actor: note.author,
+      createdAt: note.created_at,
+      system: note.system,
+    }
+    activities.push(...parseGitLabActivity(activityNote))
+    if (note.system || !note.author) continue
     items.push({
       id: `gitlab:note:${note.id}`,
       url: `${mrWebUrl}#note_${note.id}`,
       author: note.author.username,
+      ...(note.author.id === undefined ? {} : { authorId: note.author.id }),
       createdAt: note.created_at,
       updatedAt: note.updated_at,
     })
   }
-  return items
+  return { comments: items, activities }
 }
